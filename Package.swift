@@ -17,5 +17,13 @@ let package = Package(
             // concurrency model; revisit when the whole app moves to Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "ClippyTests",
+            dependencies: [
+                "Clippy",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
