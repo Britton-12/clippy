@@ -1,51 +1,45 @@
 import SwiftUI
 
-enum PanelTab: String, CaseIterable, Identifiable {
-    case history
-    case pinned
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .history: return "History"
-        case .pinned: return "Pinned"
-        }
-    }
-}
-
-/// Content of the popup panel: search, History/Pinned tabs, date-sectioned
-/// card list, hint footer. Keyboard driven end to end.
+/// Content of the popup panel: search bar, a 75/25 split between the main
+/// content pane and the category side pane, and a shortcut footer. The main
+/// pane slides between History and a selected category. Keyboard driven end
+/// to end.
 struct ClipListView: View {
     @ObservedObject var store: ClipStore
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let onPaste: (Clip, Bool) -> Void
     let onEdit: (Clip) -> Void
     let onClose: () -> Void
     let onOpenSettings: () -> Void
 
-    @State private var tab: PanelTab = .history
+    @State private var selection: PanelSelection = .history
     @State private var selectedIndex = 0
     @FocusState private var searchFocused: Bool
 
-    /// Clips shown for the current tab, in keyboard-navigation order.
+    /// Clips shown for the current selection, in keyboard-navigation order.
     private var visibleClips: [Clip] {
-        switch tab {
-        case .history: return store.clips
-        case .pinned: return store.clips.filter { store.isPinned($0) }
+        switch selection {
+        case .history:
+            return store.clips
+        case .category(let categoryID):
+            return store.clips.filter { store.categoryIDs(for: $0).contains(categoryID) }
         }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             searchBar
-            tabBar
             Divider()
-            if visibleClips.isEmpty {
-                emptyState
-            } else {
-                sectionedList
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    mainPane
+                        .frame(width: max(0, geo.size.width - sidePaneWidth(geo)))
+                    Divider()
+                    CategorySidePane(store: store, selection: $selection)
+                        .frame(width: sidePaneWidth(geo) - 1)
+                }
             }
             Divider()
             footer
@@ -58,7 +52,12 @@ struct ClipListView: View {
         )
         .tint(settings.accentColor)
         .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
-        .onChange(of: tab) { _, _ in selectedIndex = 0 }
+        .onChange(of: selection) { _, _ in selectedIndex = 0 }
+    }
+
+    /// Side pane takes a quarter of the panel but never less than 150pt.
+    private func sidePaneWidth(_ geo: GeometryProxy) -> CGFloat {
+        max(150, geo.size.width * 0.25)
     }
 
     @ViewBuilder
@@ -67,6 +66,36 @@ struct ClipListView: View {
             Rectangle().fill(material)
         } else {
             Color(nsColor: .windowBackgroundColor)
+        }
+    }
+
+    // MARK: - Main pane
+
+    private var mainPane: some View {
+        ZStack {
+            if selection == .history {
+                paneContent
+                    .transition(paneTransition(edge: .leading))
+            } else {
+                paneContent
+                    .id(selection)
+                    .transition(paneTransition(edge: .trailing))
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
+        .clipped()
+    }
+
+    private func paneTransition(edge: Edge) -> AnyTransition {
+        .move(edge: edge).combined(with: .opacity)
+    }
+
+    @ViewBuilder
+    private var paneContent: some View {
+        if visibleClips.isEmpty {
+            emptyState
+        } else {
+            sectionedList
         }
     }
 
@@ -89,7 +118,10 @@ struct ClipListView: View {
                 }
                 .onKeyPress(.escape) { onClose(); return .handled }
                 .onKeyPress(keys: ["e"]) { press in
-                    guard press.modifiers.contains(.command), let clip = selectedClip, clip.contentKind == .text else { return .ignored }
+                    guard press.modifiers.contains(.command),
+                          let clip = selectedClip,
+                          clip.contentKind == .text
+                    else { return .ignored }
                     onEdit(clip)
                     return .handled
                 }
@@ -103,14 +135,19 @@ struct ClipListView: View {
                     store.delete(clip)
                     return .handled
                 }
-                .onKeyPress(keys: ["1"]) { press in
-                    guard press.modifiers.contains(.command) else { return .ignored }
-                    tab = .history
-                    return .handled
-                }
-                .onKeyPress(keys: ["2"]) { press in
-                    guard press.modifiers.contains(.command) else { return .ignored }
-                    tab = .pinned
+                .onKeyPress(keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]) { press in
+                    guard press.modifiers.contains(.command),
+                          let digit = press.characters.first?.wholeNumberValue
+                    else { return .ignored }
+                    if digit == 1 {
+                        selection = .history
+                        return .handled
+                    }
+                    let index = digit - 2
+                    guard store.categories.indices.contains(index),
+                          let categoryID = store.categories[index].id
+                    else { return .ignored }
+                    selection = .category(categoryID)
                     return .handled
                 }
             Button(action: onOpenSettings) {
@@ -120,55 +157,11 @@ struct ClipListView: View {
             }
             .buttonStyle(.borderless)
             .help("Clippy settings")
+            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.vertical, 10)
         .onAppear { searchFocused = true }
-    }
-
-    private var tabBar: some View {
-        HStack(spacing: 8) {
-            ForEach(PanelTab.allCases) { candidate in
-                tabButton(candidate)
-            }
-            Spacer()
-            Text("\(visibleClips.count) \(visibleClips.count == 1 ? "clip" : "clips")")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-    }
-
-    private func tabButton(_ candidate: PanelTab) -> some View {
-        let isActive = tab == candidate
-        return Button {
-            tab = candidate
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: candidate == .history ? "clock" : "pin")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(candidate.label)
-                    .font(.caption.weight(isActive ? .semibold : .regular))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(
-                isActive ? AnyShapeStyle(settings.accentColor.opacity(0.18)) : AnyShapeStyle(.clear),
-                in: Capsule()
-            )
-            .overlay(
-                Capsule().strokeBorder(
-                    isActive ? settings.accentColor.opacity(0.5) : Color(nsColor: .separatorColor).opacity(0.5),
-                    lineWidth: 1
-                )
-            )
-            .foregroundStyle(isActive ? AnyShapeStyle(settings.accentColor) : AnyShapeStyle(.secondary))
-        }
-        .buttonStyle(.plain)
-        .help(candidate == .history ? "All history (cmd 1)" : "Pinned items (cmd 2)")
     }
 
     // MARK: - Sectioned list
@@ -181,7 +174,8 @@ struct ClipListView: View {
 
     private var sections: [Section] {
         let rows = Array(visibleClips.enumerated()).map { (index: $0.offset, clip: $0.element) }
-        guard settings.showSectionHeaders else {
+        // Date headers only make sense for the chronological history.
+        guard settings.showSectionHeaders, selection == .history else {
             return [Section(id: "all", title: "", rows: rows)]
         }
 
@@ -265,18 +259,36 @@ struct ClipListView: View {
         )
         .id(clip.id)
         .onTapGesture { onPaste(clip, settings.pastePlainTextByDefault) }
+        .draggable(String(clip.id ?? -1))
         .contextMenu {
             Button("Paste") { onPaste(clip, false) }
             if clip.contentKind == .text {
                 Button("Paste as Plain Text") { onPaste(clip, true) }
-            }
-            Divider()
-            if clip.contentKind == .text {
+                Divider()
                 Button("Edit...") { onEdit(clip) }
             }
             Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
+            categoriesMenu(for: clip)
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
+        }
+    }
+
+    private func categoriesMenu(for clip: Clip) -> some View {
+        Menu("Categories") {
+            ForEach(store.categories) { category in
+                let categoryID = category.id ?? -1
+                let isMember = store.categoryIDs(for: clip).contains(categoryID)
+                Button {
+                    store.setClip(clip, inCategory: categoryID, !isMember)
+                } label: {
+                    if isMember {
+                        Label(category.name, systemImage: "checkmark")
+                    } else {
+                        Text(category.name)
+                    }
+                }
+            }
         }
     }
 
@@ -284,7 +296,7 @@ struct ClipListView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: tab == .pinned ? "pin" : "clipboard")
+            Image(systemName: emptyIcon)
                 .font(.system(size: 30, weight: .light))
                 .foregroundStyle(.tertiary)
             Text(emptyMessage)
@@ -296,40 +308,50 @@ struct ClipListView: View {
         .padding(24)
     }
 
+    private var emptyIcon: String {
+        switch selection {
+        case .history: return "clipboard"
+        case .category: return "tray"
+        }
+    }
+
     private var emptyMessage: String {
         if !store.query.isEmpty {
             return "No clips match \"\(store.query)\"."
         }
-        switch tab {
-        case .history: return "Nothing here yet. Copy something and it will show up."
-        case .pinned: return "No pinned clips. Select a clip and press \u{2318}P to keep it here."
+        switch selection {
+        case .history:
+            return "Nothing here yet. Copy something and it will show up."
+        case .category:
+            return "No clips in this category yet. Right-click a clip and choose Categories, or drag a card onto the category."
         }
     }
 
     private var footer: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 14) {
             keyHint("\u{21A9}", settings.pastePlainTextByDefault ? "paste plain" : "paste")
             keyHint("\u{21E7}\u{21A9}", settings.pastePlainTextByDefault ? "formatted" : "plain")
-            keyHint("\u{2318}E", "edit")
             keyHint("\u{2318}P", "pin")
             keyHint("\u{238B}", "close")
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
     }
 
     private func keyHint(_ key: String, _ action: String) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 5) {
             Text(key)
-                .font(.system(size: 9, weight: .semibold))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1.5)
-                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 3))
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
             Text(action)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(.primary.opacity(0.75))
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(key), \(action)")
     }
 
     // MARK: - Selection and actions
