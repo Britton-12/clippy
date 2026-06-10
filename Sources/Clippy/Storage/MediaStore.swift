@@ -41,9 +41,12 @@ final class MediaStore {
         let mediaFilename = "\(hash).png"
         let thumbFilename = "\(hash)-thumb.jpg"
         let mediaURL = url(for: mediaFilename)
+        let thumbURL = url(for: thumbFilename)
         if !FileManager.default.fileExists(atPath: mediaURL.path) {
             try pngData.write(to: mediaURL, options: .atomic)
-            try Self.thumbnailJPEG(from: rep).write(to: url(for: thumbFilename), options: .atomic)
+        }
+        if !FileManager.default.fileExists(atPath: thumbURL.path) {
+            try Self.thumbnailJPEG(from: rep).write(to: thumbURL, options: .atomic)
         }
         return StoredImage(
             mediaFilename: mediaFilename,
@@ -69,19 +72,31 @@ final class MediaStore {
         }
     }
 
+    /// CGContext (not NSImage.lockFocus) so this is safe off the main thread;
+    /// capture may run from background callers.
     private static func thumbnailJPEG(from rep: NSBitmapImageRep) throws -> Data {
         let width = CGFloat(rep.pixelsWide)
         let height = CGFloat(rep.pixelsHigh)
+        guard width > 0, height > 0, let cgImage = rep.cgImage else {
+            throw MediaStoreError.thumbnailFailed
+        }
         let scale = min(1, thumbnailMaxEdge / max(width, height))
-        let targetSize = NSSize(width: max(1, width * scale), height: max(1, height * scale))
-        let image = NSImage(size: targetSize)
-        image.lockFocus()
-        rep.draw(in: NSRect(origin: .zero, size: targetSize))
-        image.unlockFocus()
-        guard
-            let tiff = image.tiffRepresentation,
-            let thumbRep = NSBitmapImageRep(data: tiff),
-            let jpeg = thumbRep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        let targetWidth = max(1, Int(width * scale))
+        let targetHeight = max(1, Int(height * scale))
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { throw MediaStoreError.thumbnailFailed }
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        guard let scaled = context.makeImage() else { throw MediaStoreError.thumbnailFailed }
+        guard let jpeg = NSBitmapImageRep(cgImage: scaled)
+            .representation(using: .jpeg, properties: [.compressionFactor: 0.8])
         else { throw MediaStoreError.thumbnailFailed }
         return jpeg
     }
