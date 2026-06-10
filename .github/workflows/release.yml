@@ -1,11 +1,26 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds Clippy.app at that version, signs the zip
-# with the Sparkle EdDSA key, publishes a GitHub Release, and refreshes
-# appcast.xml on main so running apps see the update.
+# Pushing any v* tag builds Clippy.app at that version, signs the zip with
+# the Sparkle EdDSA key, publishes a GitHub Release, and refreshes appcast.xml
+# on main so running apps see the update.
+#
+# workflow_dispatch lets you kick off a release from the Actions tab or via:
+#   gh workflow run release.yml -f version=0.3.0
+# On dispatch the job derives VERSION from the input, creates the tag (if it
+# does not already exist) using GITHUB_TOKEN, and pushes it. That tag push
+# does NOT fire a second run of this workflow because GitHub Actions documents
+# that events triggered by GITHUB_TOKEN do not create new workflow runs (except
+# workflow_dispatch/repository_dispatch). Source:
+#   https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow
 on:
     push:
-        tags: ["v0.2.0"]
+        tags: ["v*"]
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Version to release (e.g. 0.3.0 - no leading v)"
+                required: true
+                type: string
 
 permissions:
     contents: write
@@ -13,15 +28,71 @@ permissions:
 env:
     # Pin the Sparkle CLI tools; keep loosely in sync with Package.swift.
     SPARKLE_VERSION: 2.9.3
+    # Opt in to Node 24 for JavaScript actions ahead of the runner default change.
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
     release:
         runs-on: macos-15
         steps:
-            - uses: actions/checkout@v6.0.3
+            - name: Derive VERSION
+              # For a tag push, strip the leading "v" from the ref name.
+              # For a manual dispatch, take the input directly.
+              # Either way VERSION is available to every subsequent step.
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                      echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+                  else
+                      echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+                  fi
 
-            - name: Derive version from tag
-              run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            # On dispatch we need to create (and push) the tag so the GitHub
+            # Release can reference it. fetch-depth: 0 is required so we have
+            # the full history needed for git tag; ref: main ensures we check
+            # out the branch tip, not a detached tag ref (relevant on dispatch).
+            # The GITHUB_TOKEN push of this tag does NOT retrigger the workflow
+            # (documented behavior - see header comment above).
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  ref: main
+
+            - name: Create and push tag (dispatch only)
+              if: github.event_name == 'workflow_dispatch'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  TAG="v${{ inputs.version }}"
+                  if git rev-parse "$TAG" >/dev/null 2>&1; then
+                      echo "Tag $TAG already exists locally, skipping creation"
+                  elif git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+                      echo "Tag $TAG already exists on remote, fetching"
+                      git fetch origin "$TAG"
+                  else
+                      git tag "$TAG"
+                      git push origin "$TAG"
+                      echo "Created and pushed tag $TAG"
+                  fi
+
+            # ---------------------------------------------------------------
+            # Preflight: fail early with a clear message rather than silently
+            # producing a broken release later.
+            # ---------------------------------------------------------------
+            - name: Preflight checks
+              env:
+                  SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+              run: |
+                  FAIL=0
+                  if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+                      echo "::error::SPARKLE_ED_PRIVATE_KEY secret is not set - Sparkle signing will fail" >&2
+                      FAIL=1
+                  fi
+                  if [ ! -f "assets/AppIcon.icns" ]; then
+                      echo "::error::assets/AppIcon.icns not found in checkout - build will fail" >&2
+                      FAIL=1
+                  fi
+                  [ "$FAIL" -eq 0 ] || exit 1
 
             - name: Run tests
               run: swift test
@@ -43,10 +114,6 @@ jobs:
               env:
                   SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
               run: |
-                  if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
-                    echo "::error::SPARKLE_ED_PRIVATE_KEY secret is not set" >&2
-                    exit 1
-                  fi
                   SIGNATURE=$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | \
                     /tmp/sparkle-dist/bin/sign_update "build/Clippy-$VERSION.zip" --ed-key-file -)
                   echo "SIGNATURE=$SIGNATURE" >> "$GITHUB_ENV"
@@ -58,17 +125,46 @@ jobs:
                     "$SIGNATURE" \
                     "$RUNNER_TEMP/appcast.xml"
 
+            # ---------------------------------------------------------------
+            # Publish: idempotent. If a release for this tag already exists
+            # (e.g. the user pre-created it in the GitHub UI), upload/replace
+            # the asset on it. If it does not exist, create it. Either way
+            # we verify the asset is attached before succeeding.
+            # ---------------------------------------------------------------
             - name: Publish GitHub Release
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
-                  gh release create "v$VERSION" "build/Clippy-$VERSION.zip" \
-                    --title "Clippy v$VERSION" \
-                    --generate-notes \
-                    --notes "First install: unzip, drag Clippy.app to Applications, then right-click > Open once (the app is not notarized). Existing installs update in-app automatically."
+                  TAG="v$VERSION"
+                  ASSET="build/Clippy-$VERSION.zip"
 
-            # The appcast goes live only after the release asset exists, so update
-            # checks never point at a download that is not there yet.
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                      echo "Release $TAG already exists - uploading/replacing asset"
+                      gh release upload "$TAG" "$ASSET" --clobber
+                  else
+                      echo "Creating release $TAG"
+                      gh release create "$TAG" "$ASSET" \
+                        --title "Clippy v$VERSION" \
+                        --generate-notes \
+                        --notes "First install: unzip, drag Clippy.app to Applications, then right-click > Open once (the app is not notarized). Existing installs update in-app automatically."
+                  fi
+
+                  # Verify the asset is actually attached before we move on.
+                  # A missing asset means the upload silently failed somehow.
+                  ASSET_NAME="Clippy-$VERSION.zip"
+                  ATTACHED=$(gh release view "$TAG" --json assets \
+                    --jq ".assets[] | select(.name == \"$ASSET_NAME\") | .name" 2>/dev/null || true)
+                  if [ -z "$ATTACHED" ]; then
+                      echo "::error::Asset $ASSET_NAME was not found on release $TAG after upload - something went wrong" >&2
+                      exit 1
+                  fi
+                  echo "Verified: $ASSET_NAME is attached to $TAG"
+
+            # The appcast goes live only after the release asset exists, so
+            # update checks never point at a download that is not there yet.
+            # On both tag-push and dispatch paths, we commit to main explicitly
+            # (the "git switch -C main" below ensures we are on the branch, not
+            # a detached tag ref, which would make the push fail or go nowhere).
             - name: Commit appcast to main
               run: |
                   git config user.name "github-actions[bot]"
