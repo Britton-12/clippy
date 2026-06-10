@@ -33,11 +33,16 @@
 !docs/**
 !scripts/
 !scripts/**
+!assets/
+!assets/**
+!img/
+!img/**
 
 # Re-exclude generated artifacts (must come after allowlist)
 .build/
 build/
 **/.DS_Store
+assets/AppIcon.iconset/
 
 # Pre-commit verification:
 #   1. git status            # nothing unexpected staged?

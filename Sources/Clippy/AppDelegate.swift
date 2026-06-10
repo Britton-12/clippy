@@ -46,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panelController.onEdit = { [weak self] clip in
             guard let self else { return }
-            self.panelController.hide()
+            // Panel stays open while the editor is visible; only item-click,
+            // hotkey toggle, and Escape are valid close triggers.
             self.editorController.open(clip: clip) { newText in
                 self.store.updateText(of: clip, to: newText)
             }

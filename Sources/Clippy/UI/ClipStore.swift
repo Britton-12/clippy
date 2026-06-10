@@ -41,9 +41,12 @@ final class ClipStore: ObservableObject {
                 arguments: [limit]
             )
         }
+        // .immediate delivers the first batch synchronously before start() returns,
+        // so the panel always has data the moment it becomes visible. Subsequent
+        // updates still arrive asynchronously (GRDB coalesces them).
         clipsCancellable = clipObservation.start(
             in: database.dbQueue,
-            scheduling: .async(onQueue: .main),
+            scheduling: .immediate,
             onError: { error in
                 NSLog("Clippy: clip observation failed: \(error)")
             },

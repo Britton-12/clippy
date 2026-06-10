@@ -1,0 +1,49 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clippy release and update flow">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7f1d1d"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#fde68a"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bg)"/>
+
+  <text x="120" y="130" fill="#ffffff" font-size="54" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-weight="700">Release pipeline + Sparkle updates</text>
+  <text x="120" y="172" fill="#ffedd5" font-size="24" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">Tag once, ship signed updates, and let users install in place.</text>
+
+  <g transform="translate(120,250)">
+    <rect width="220" height="120" rx="18" fill="#111827" fill-opacity="0.5" stroke="#fde68a"/>
+    <text x="24" y="52" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">git tag</text>
+    <text x="24" y="84" fill="#fff7ed" font-size="22" font-family="Menlo, Monaco, Consolas, monospace">v0.2.0</text>
+  </g>
+
+  <g transform="translate(400,250)">
+    <rect width="260" height="120" rx="18" fill="#111827" fill-opacity="0.5" stroke="#fde68a"/>
+    <text x="24" y="52" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">GitHub Actions</text>
+    <text x="24" y="84" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">build + sign + appcast</text>
+  </g>
+
+  <g transform="translate(720,250)">
+    <rect width="220" height="120" rx="18" fill="#111827" fill-opacity="0.5" stroke="#fde68a"/>
+    <text x="24" y="52" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">GitHub Release</text>
+    <text x="24" y="84" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">signed zip</text>
+  </g>
+
+  <g transform="translate(1000,250)">
+    <rect width="180" height="120" rx="18" fill="#111827" fill-opacity="0.5" stroke="#fde68a"/>
+    <text x="24" y="52" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">Sparkle</text>
+    <text x="24" y="84" fill="#fff7ed" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">in-app update</text>
+  </g>
+
+  <line x1="340" y1="310" x2="400" y2="310" stroke="#fde68a" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="660" y1="310" x2="720" y2="310" stroke="#fde68a" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="940" y1="310" x2="1000" y2="310" stroke="#fde68a" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="120" y="430" width="1060" height="190" rx="24" fill="#ffedd5" fill-opacity="0.12" stroke="#fed7aa" stroke-opacity="0.5"/>
+  <text x="160" y="495" fill="#ffffff" font-size="30" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-weight="600">One-time setup checkpoint</text>
+  <text x="160" y="540" fill="#ffedd5" font-size="23" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">Store the private key in GitHub Actions secret: SPARKLE_ED_PRIVATE_KEY</text>
+  <text x="160" y="578" fill="#ffedd5" font-size="23" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">Commit only scripts/sparkle-public-key.txt to the repository.</text>
+</svg>

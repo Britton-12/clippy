@@ -39,14 +39,23 @@ final class PanelController: NSObject, NSWindowDelegate {
             onEdit: { [weak self] clip in self?.onEdit?(clip) },
             onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in
-                self?.hide()
+                // Settings opens alongside the panel; panel stays visible.
                 self?.onOpenSettings?()
             }
         )
         panel.appearance = settings.appearanceMode.nsAppearance
         panel.contentView = NSHostingView(rootView: root)
-        panel.setFrame(presentationFrame(size: size), display: false)
+
+        // Position synchronously using the last-known or mouse anchor so the
+        // panel appears immediately. For caret mode, refine the position on a
+        // background thread to avoid blocking the main thread on the AX API.
+        let initialFrame = fastFrame(size: size)
+        panel.setFrame(initialFrame, display: false)
         panel.makeKeyAndOrderFront(nil)
+
+        if settings.positionMode == .caret {
+            repositionAtCaretAsync(panel: panel, size: size)
+        }
     }
 
     func hide() {
@@ -74,8 +83,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidResignKey(_ notification: Notification) {
-        // Clicking anywhere else dismisses the panel, like a menu.
-        hide()
+        // Panel is intentionally persistent: focus loss does not close it.
+        // The only valid close triggers are item click, hotkey toggle, and Escape.
     }
 
     // MARK: - Construction and placement
@@ -88,7 +97,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: true
         )
-        panel.level = .floating
+        // .statusBar (25) floats above every normal app window and above full-screen
+        // app chrome, which satisfies the "above everything" requirement without
+        // covering the system screensaver.
+        panel.level = .statusBar
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
@@ -96,20 +108,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.minSize = NSSize(width: 280, height: 240)
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        // .canJoinAllSpaces: stays visible across space switches.
+        // .fullScreenAuxiliary: renders over full-screen apps.
+        // .managed (not .transient): the window manager keeps it in the current
+        //   space instead of evicting it during Mission Control transitions.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .managed]
         panel.animationBehavior = .utilityWindow
         panel.delegate = self
         self.panel = panel
         return panel
     }
 
-    private func presentationFrame(size: NSSize) -> NSRect {
+    /// Synchronous frame that never calls the AX API, safe to call on the main
+    /// thread with no risk of blocking. For caret mode it uses the mouse as the
+    /// initial anchor; repositionAtCaretAsync() refines it once the AX result
+    /// arrives on a background thread.
+    private func fastFrame(size: NSSize) -> NSRect {
         switch settings.positionMode {
         case .caret:
-            if let caret = CaretLocator.caretScreenRect() {
-                return frame(anchoredTo: caret, size: size)
-            }
-            // Electron hosts and apps that block AX: fall back to the mouse.
+            // Use mouse as a cheap stand-in; async refinement follows immediately.
             return frame(anchoredTo: mouseAnchor(), size: size)
         case .mouse:
             return frame(anchoredTo: mouseAnchor(), size: size)
@@ -120,6 +137,31 @@ final class PanelController: NSObject, NSWindowDelegate {
             return centeredFrame(size: size)
         case .screenCenter:
             return centeredFrame(size: size)
+        }
+    }
+
+    /// Looks up the caret rect on a background thread (AX can block) and
+    /// moves the panel if the result differs meaningfully from its current
+    /// position. No-ops if the panel was closed before the lookup returns.
+    private func repositionAtCaretAsync(panel: PastePanel, size: NSSize) {
+        DispatchQueue.global(qos: .userInteractive).async { [weak self, weak panel] in
+            guard let self else { return }
+            let caretRect = CaretLocator.caretScreenRect()
+            DispatchQueue.main.async { [weak self, weak panel] in
+                guard let self, let panel, panel.isVisible else { return }
+                let target: NSRect
+                if let caret = caretRect {
+                    target = self.frame(anchoredTo: caret, size: size)
+                } else {
+                    // AX unavailable or app blocked it; mouse anchor already set.
+                    return
+                }
+                // Only animate if the delta is visible to the user (> 4pt).
+                if abs(target.origin.x - panel.frame.origin.x) > 4
+                    || abs(target.origin.y - panel.frame.origin.y) > 4 {
+                    panel.setFrame(target, display: true, animate: false)
+                }
+            }
         }
     }
 

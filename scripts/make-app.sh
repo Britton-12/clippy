@@ -19,8 +19,12 @@ swift build -c release
 
 APP="build/Clippy.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp .build/release/Clippy "$APP/Contents/MacOS/Clippy"
+
+# Copy the pre-built icon into the bundle's Resources directory.
+# The .icns is generated once via: swift assets/generate-icon.swift
+cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Sparkle ships as a binary xcframework inside the SwiftPM artifacts dir; the
 # app bundle needs its own embedded copy plus an rpath that points at it.
@@ -62,6 +66,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>Clippy</string>
     <key>CFBundleIdentifier</key>
     <string>com.jerry.clippy</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleName</key>
     <string>Clippy</string>
     <key>CFBundlePackageType</key>
