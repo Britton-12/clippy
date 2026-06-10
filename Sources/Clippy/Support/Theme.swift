@@ -122,3 +122,19 @@ enum CardColorMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+/// Fixed hexes for category colors. Stored in the DB as text, so they must
+/// be stable values rather than dynamic system colors.
+enum CategoryPalette {
+    static let hexes: [String] = [
+        "#007AFF", "#AF52DE", "#FF2D55", "#FF3B30", "#FF9500",
+        "#FFCC00", "#34C759", "#30B0C7", "#5E5CE6", "#8E8E93",
+    ]
+}
+
+extension Color {
+    /// #RGB, #RRGGBB, or #RRGGBBAA; falls back to system gray.
+    init(hexString: String) {
+        self = ClipKind.parseHexColor(hexString) ?? Color(nsColor: .systemGray)
+    }
+}

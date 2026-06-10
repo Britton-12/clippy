@@ -256,7 +256,7 @@ struct ClipListView: View {
                     guard let id = category.id else { return false }
                     return store.categoryIDs(for: clip).contains(id)
                 }
-                .map { ClipKind.parseHexColor($0.colorHex) ?? Color(nsColor: .systemGray) },
+                .map { Color(hexString: $0.colorHex) },
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onEdit: { onEdit(clip) },
