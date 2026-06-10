@@ -54,7 +54,7 @@ private struct GeneralSettingsTab: View {
                     in: 50...10000,
                     step: 50
                 )
-                Text("Pinned clips never count against the cap and survive Clear History.")
+                Text("Clips in categories never count against the cap and survive Clear Unpinned History.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -309,13 +309,15 @@ private struct IntegrationsSettingsTab: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            let clips = try ClipDatabase.shared.allClips().map {
+            // Pinned is derived under the category model: in at least one category.
+            let membership = try ClipDatabase.shared.membershipMap()
+            let clips = try ClipDatabase.shared.allClips().map { clip in
                 ExportClip(
-                    text: $0.contentText,
-                    sourceApp: $0.sourceAppName,
-                    sourceBundleID: $0.sourceAppBundleID,
-                    createdAt: $0.createdAt,
-                    pinned: $0.isPinned
+                    text: clip.contentText,
+                    sourceApp: clip.sourceAppName,
+                    sourceBundleID: clip.sourceAppBundleID,
+                    createdAt: clip.createdAt,
+                    pinned: clip.id.map { !(membership[$0] ?? []).isEmpty } ?? false
                 )
             }
             let encoder = JSONEncoder()

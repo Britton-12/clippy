@@ -33,7 +33,7 @@ struct ClipListView: View {
     private var visibleClips: [Clip] {
         switch tab {
         case .history: return store.clips
-        case .pinned: return store.clips.filter(\.isPinned)
+        case .pinned: return store.clips.filter { store.isPinned($0) }
         }
     }
 
@@ -198,7 +198,6 @@ struct ClipListView: View {
     }
 
     private func sectionTitle(for clip: Clip) -> String {
-        if tab == .history, clip.isPinned { return "Pinned" }
         let calendar = Calendar.current
         if calendar.isDateInToday(clip.createdAt) { return "Today" }
         if calendar.isDateInYesterday(clip.createdAt) { return "Yesterday" }
@@ -251,6 +250,7 @@ struct ClipListView: View {
         ClipCardView(
             clip: clip,
             isSelected: index == selectedIndex,
+            isPinned: store.isPinned(clip),
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onEdit: { onEdit(clip) },
@@ -264,7 +264,7 @@ struct ClipListView: View {
             Button("Paste as Plain Text") { onPaste(clip, true) }
             Divider()
             Button("Edit...") { onEdit(clip) }
-            Button(clip.isPinned ? "Unpin" : "Pin") { store.togglePin(clip) }
+            Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
         }

@@ -6,6 +6,7 @@ import SwiftUI
 struct ClipCardView: View {
     let clip: Clip
     let isSelected: Bool
+    let isPinned: Bool
 
     let onPaste: () -> Void
     let onPastePlain: () -> Void
@@ -110,7 +111,7 @@ struct ClipCardView: View {
                     .foregroundStyle(.secondary)
                     .help("Has rich formatting")
             }
-            if clip.isPinned {
+            if isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(.orange)
@@ -127,8 +128,8 @@ struct ClipCardView: View {
             cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
             cardActionButton("pencil", help: "Edit", action: onEdit)
             cardActionButton(
-                clip.isPinned ? "pin.slash" : "pin",
-                help: clip.isPinned ? "Unpin" : "Pin",
+                isPinned ? "pin.slash" : "pin",
+                help: isPinned ? "Unpin" : "Pin",
                 action: onTogglePin
             )
             cardActionButton("trash", help: "Delete", action: onDelete)

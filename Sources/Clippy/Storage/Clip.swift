@@ -10,7 +10,6 @@ struct Clip: Identifiable, Equatable, Codable, FetchableRecord, MutablePersistab
     var sourceAppBundleID: String?
     var sourceAppName: String?
     var createdAt: Date
-    var isPinned: Bool
 
     static let databaseTableName = "clips"
 

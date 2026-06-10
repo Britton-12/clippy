@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .warning
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
-            try? database.deleteUnpinnedClips()
+            try? database.deleteUnclassifiedClips()
         }
     }
 }

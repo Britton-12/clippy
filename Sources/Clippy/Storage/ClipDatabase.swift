@@ -52,6 +52,46 @@ final class ClipDatabase {
                 t.column("contentText")
             }
         }
+        migrator.registerMigration("v2-categories") { db in
+            try db.create(table: "category") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("name", .text).notNull()
+                t.column("colorHex", .text).notNull()
+                t.column("iconKind", .text).notNull()
+                t.column("iconValue", .text).notNull()
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+                t.column("isStarter", .boolean).notNull().defaults(to: false)
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(table: "clip_category") { t in
+                t.column("clipID", .integer).notNull()
+                    .references("clips", onDelete: .cascade)
+                t.column("categoryID", .integer).notNull()
+                    .references("category", onDelete: .cascade)
+                t.column("addedAt", .datetime).notNull()
+                t.primaryKey(["clipID", "categoryID"])
+            }
+            // Starter category receives every legacy pinned clip so nothing
+            // is lost; users can rename or restyle it later.
+            try db.execute(
+                sql: """
+                    INSERT INTO category (name, colorHex, iconKind, iconValue, sortOrder, isStarter, createdAt)
+                    VALUES ('Pinned', '#FF9500', 'symbol', 'pin.fill', 0, 1, ?)
+                    """,
+                arguments: [Date()]
+            )
+            let starterID = db.lastInsertedRowID
+            try db.execute(
+                sql: """
+                    INSERT INTO clip_category (clipID, categoryID, addedAt)
+                    SELECT id, ?, ? FROM clips WHERE isPinned = 1
+                    """,
+                arguments: [starterID, Date()]
+            )
+            try db.alter(table: "clips") { t in
+                t.drop(column: "isPinned")
+            }
+        }
         return migrator
     }
 
@@ -75,22 +115,29 @@ final class ClipDatabase {
             }
             var inserting = newClip
             try inserting.insert(db)
-            if cap > 0 {
-                try db.execute(
-                    sql: """
-                        DELETE FROM clips
-                        WHERE isPinned = 0
-                        AND id NOT IN (
-                            SELECT id FROM clips
-                            WHERE isPinned = 0
-                            ORDER BY createdAt DESC, id DESC
-                            LIMIT ?
-                        )
-                        """,
-                    arguments: [cap]
-                )
-            }
+            try Self.evictOverCap(db, cap: cap)
         }
+    }
+
+    /// Deletes uncategorized clips beyond the cap, oldest first. Clips in any
+    /// category never count against the cap.
+    @discardableResult
+    static func evictOverCap(_ db: Database, cap: Int) throws -> [String] {
+        guard cap > 0 else { return [] }
+        try db.execute(
+            sql: """
+                DELETE FROM clips
+                WHERE id NOT IN (SELECT clipID FROM clip_category)
+                AND id NOT IN (
+                    SELECT id FROM clips
+                    WHERE id NOT IN (SELECT clipID FROM clip_category)
+                    ORDER BY createdAt DESC, id DESC
+                    LIMIT ?
+                )
+                """,
+            arguments: [cap]
+        )
+        return []
     }
 
     /// User edited the text in the plain-text editor. The original rich blobs
@@ -109,21 +156,15 @@ final class ClipDatabase {
         }
     }
 
-    func togglePin(id: Int64) throws {
-        try dbQueue.write { db in
-            try db.execute(sql: "UPDATE clips SET isPinned = NOT isPinned WHERE id = ?", arguments: [id])
-        }
-    }
-
     func deleteClip(id: Int64) throws {
         _ = try dbQueue.write { db in
             try Clip.deleteOne(db, key: id)
         }
     }
 
-    func deleteUnpinnedClips() throws {
+    func deleteUnclassifiedClips() throws {
         try dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM clips WHERE isPinned = 0")
+            try db.execute(sql: "DELETE FROM clips WHERE id NOT IN (SELECT clipID FROM clip_category)")
         }
     }
 
@@ -144,11 +185,102 @@ final class ClipDatabase {
                     SELECT clips.* FROM clips
                     JOIN clips_fts ON clips_fts.rowid = clips.id
                     WHERE clips_fts MATCH ?
-                    ORDER BY clips.isPinned DESC, rank
+                    ORDER BY rank
                     LIMIT ?
                     """,
                 arguments: [pattern, limit]
             )
+        }
+    }
+
+    // MARK: - Categories
+
+    func categories() throws -> [Category] {
+        try dbQueue.read { db in
+            try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
+        }
+    }
+
+    func starterCategory() throws -> Category? {
+        try dbQueue.read { db in
+            try Category.filter(Column("isStarter") == true).fetchOne(db)
+        }
+    }
+
+    @discardableResult
+    func createCategory(
+        named name: String,
+        colorHex: String,
+        iconKind: CategoryIconKind,
+        iconValue: String
+    ) throws -> Category {
+        try dbQueue.write { db in
+            let maxOrder = try Int.fetchOne(db, sql: "SELECT IFNULL(MAX(sortOrder), -1) FROM category") ?? -1
+            var category = Category(
+                id: nil,
+                name: name,
+                colorHex: colorHex,
+                iconKind: iconKind,
+                iconValue: iconValue,
+                sortOrder: maxOrder + 1,
+                isStarter: false,
+                createdAt: Date()
+            )
+            try category.insert(db)
+            return category
+        }
+    }
+
+    func updateCategory(_ category: Category) throws {
+        try dbQueue.write { db in
+            try category.update(db)
+        }
+    }
+
+    func deleteCategory(id: Int64) throws {
+        _ = try dbQueue.write { db in
+            try Category.deleteOne(db, key: id)
+        }
+    }
+
+    func setClip(_ clipID: Int64, inCategory categoryID: Int64, _ isMember: Bool) throws {
+        try dbQueue.write { db in
+            if isMember {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO clip_category (clipID, categoryID, addedAt) VALUES (?, ?, ?)",
+                    arguments: [clipID, categoryID, Date()]
+                )
+            } else {
+                try db.execute(
+                    sql: "DELETE FROM clip_category WHERE clipID = ? AND categoryID = ?",
+                    arguments: [clipID, categoryID]
+                )
+            }
+        }
+    }
+
+    /// Cmd+P fast path: one keystroke toggles membership in the starter category.
+    func toggleStarterMembership(clipID: Int64) throws {
+        guard let starterID = try starterCategory()?.id else { return }
+        let isMember = try dbQueue.read { db in
+            try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM clip_category WHERE clipID = ? AND categoryID = ?)",
+                arguments: [clipID, starterID]
+            ) ?? false
+        }
+        try setClip(clipID, inCategory: starterID, !isMember)
+    }
+
+    /// clipID -> set of category IDs, for fast pinned/membership lookups in views.
+    func membershipMap() throws -> [Int64: Set<Int64>] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT clipID, categoryID FROM clip_category")
+            var map: [Int64: Set<Int64>] = [:]
+            for row in rows {
+                map[row["clipID"], default: []].insert(row["categoryID"])
+            }
+            return map
         }
     }
 }

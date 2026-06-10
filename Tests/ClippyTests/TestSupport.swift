@@ -22,7 +22,6 @@ func makeTextClip(_ text: String, createdAt: Date = Date()) -> Clip {
         typeIdentifier: "public.utf8-plain-text",
         sourceAppBundleID: "com.example.test",
         sourceAppName: "TestApp",
-        createdAt: createdAt,
-        isPinned: false
+        createdAt: createdAt
     )
 }

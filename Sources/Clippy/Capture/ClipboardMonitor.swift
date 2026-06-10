@@ -98,8 +98,7 @@ final class ClipboardMonitor {
             typeIdentifier: typeIdentifier,
             sourceAppBundleID: frontApp?.bundleIdentifier,
             sourceAppName: frontApp?.localizedName,
-            createdAt: Date(),
-            isPinned: false
+            createdAt: Date()
         )
         do {
             try database.saveCapturedClip(&clip)
