@@ -46,7 +46,7 @@ the mouse pointer and selecting a clip copies it instead of pasting.
 - Hover a card for quick actions (paste plain, edit, pin, delete);
   right-click for the full menu.
 - Menu bar icon: open panel, pause capture, settings, clear unpinned
-  history, quit.
+  history, check for updates, quit.
 
 ## Settings
 
@@ -60,6 +60,48 @@ Four tabs:
 - Capture: polling interval (100-1000 ms), per-app ignore list.
 - Integrations: export history as JSON, reveal the database in Finder,
   plus the planned MCP server, REST API, sync, and encryption surface.
+
+## Releases and auto-update
+
+Pushing a tag like `v0.2.0` runs `.github/workflows/release.yml`: tests,
+app build at the tag version, an EdDSA-signed zip, a GitHub Release, and a
+refreshed `appcast.xml` on main. Installed apps check that appcast daily via
+Sparkle and offer to download, install, and relaunch in place. The menu bar
+icon also has a manual "Check for Updates..." item.
+
+Release ritual:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+One-time setup before the first release (the private key must never enter
+the repo):
+
+```sh
+# 1. Get Sparkle's key tools (any recent 2.x works)
+curl -L -o /tmp/sparkle.tar.xz \
+  https://github.com/sparkle-project/Sparkle/releases/download/2.9.3/Sparkle-2.9.3.tar.xz
+mkdir -p /tmp/sparkle-dist && tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle-dist
+
+# 2. Generate the keypair (private key lands in your login Keychain)
+/tmp/sparkle-dist/bin/generate_keys
+
+# 3. Commit the printed public key
+echo "<public key from step 2>" > scripts/sparkle-public-key.txt
+
+# 4. Export the private key and add it as a GitHub Actions secret named
+#    SPARKLE_ED_PRIVATE_KEY (repo Settings > Secrets and variables > Actions)
+/tmp/sparkle-dist/bin/generate_keys -x /tmp/sparkle-private-key
+cat /tmp/sparkle-private-key | pbcopy && rm /tmp/sparkle-private-key
+```
+
+Local builds without a real public key just skip the updater wiring;
+`scripts/make-app.sh 1.2.3` injects a version explicitly. Because the app is
+ad-hoc signed (no notarization), first-time installers must right-click >
+Open once; Sparkle updates after that run in place and are verified against
+the EdDSA signature.
 
 ## Debug flags
 

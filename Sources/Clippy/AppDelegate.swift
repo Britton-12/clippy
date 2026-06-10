@@ -1,10 +1,20 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var pauseMenuItem: NSMenuItem!
+
+    // Sparkle needs a packaged .app whose Info.plist carries SUFeedURL; when
+    // running unbundled (swift run, smoke tests) leave the updater unstarted
+    // so it stays inert and the menu item validates to disabled.
+    private lazy var updaterController = SPUStandardUpdaterController(
+        startingUpdater: Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     private let database = ClipDatabase.shared
     private lazy var store = ClipStore(database: database)
@@ -104,6 +114,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(clearItem)
 
         menu.addItem(.separator())
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates...",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = updaterController
+        menu.addItem(updateItem)
 
         let quitItem = NSMenuItem(title: "Quit Clippy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)

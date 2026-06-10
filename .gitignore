@@ -18,6 +18,9 @@
 
 # Allowlisted project content
 !.gitignore
+!.github/
+!.github/**
+!appcast.xml
 !README.md
 !Package.swift
 !Package.resolved

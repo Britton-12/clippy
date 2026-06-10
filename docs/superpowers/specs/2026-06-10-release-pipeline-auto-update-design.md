@@ -44,7 +44,7 @@ the app today never see updates.
 
 - Accepts the version as `$1` or `$VERSION`, defaulting to `0.0.0-dev`.
 - Writes `CFBundleShortVersionString` and `CFBundleVersion` from that value.
-- Adds Sparkle keys to Info.plist: `SUFeedURL`, `SUPublicEDKeyString` (read
+- Adds Sparkle keys to Info.plist: `SUFeedURL`, `SUPublicEDKey` (read
   from `scripts/sparkle-public-key.txt`), `SUEnableAutomaticChecks`.
 - Copies `Sparkle.framework` from the SwiftPM artifacts directory into
   `Clippy.app/Contents/Frameworks` and adds an
@@ -88,9 +88,10 @@ Trigger: push of tag `v*`. Permissions: `contents: write`. Runner: `macos-15`.
 4. Sign the zip with Sparkle's `sign_update` using the
    `SPARKLE_ED_PRIVATE_KEY` secret (tool taken from the pinned Sparkle
    distribution archive).
-5. `scripts/make-appcast.sh` writes `appcast.xml`; the workflow commits it to
-   `main`.
-6. Publish the GitHub Release with the zip attached and auto-generated notes.
+5. Publish the GitHub Release with the zip attached and auto-generated notes.
+6. `scripts/make-appcast.sh` writes `appcast.xml`; the workflow commits it to
+   `main` only after the release asset exists, so the feed never points at a
+   missing download.
 
 ### 5. One-time owner setup (manual, documented in README)
 

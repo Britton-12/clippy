@@ -1,0 +1,82 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds Clippy.app at that version, signs the zip
+# with the Sparkle EdDSA key, publishes a GitHub Release, and refreshes
+# appcast.xml on main so running apps see the update.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  # Pin the Sparkle CLI tools; keep loosely in sync with Package.swift.
+  SPARKLE_VERSION: 2.9.3
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build app bundle
+        run: REQUIRE_SPARKLE=1 scripts/make-app.sh "$VERSION"
+
+      - name: Zip app
+        run: ditto -c -k --keepParent "build/Clippy.app" "build/Clippy-$VERSION.zip"
+
+      - name: Download Sparkle tools
+        run: |
+          curl -sSfL -o /tmp/sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          mkdir -p /tmp/sparkle-dist
+          tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle-dist
+
+      - name: Sign update zip
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "::error::SPARKLE_ED_PRIVATE_KEY secret is not set" >&2
+            exit 1
+          fi
+          SIGNATURE=$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | \
+            /tmp/sparkle-dist/bin/sign_update "build/Clippy-$VERSION.zip" --ed-key-file -)
+          echo "SIGNATURE=$SIGNATURE" >> "$GITHUB_ENV"
+
+      - name: Generate appcast
+        run: |
+          scripts/make-appcast.sh "$VERSION" \
+            "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Clippy-$VERSION.zip" \
+            "$SIGNATURE" \
+            "$RUNNER_TEMP/appcast.xml"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "build/Clippy-$VERSION.zip" \
+            --title "Clippy v$VERSION" \
+            --generate-notes \
+            --notes "First install: unzip, drag Clippy.app to Applications, then right-click > Open once (the app is not notarized). Existing installs update in-app automatically."
+
+      # The appcast goes live only after the release asset exists, so update
+      # checks never point at a download that is not there yet.
+      - name: Commit appcast to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch -C main origin/main
+          cp "$RUNNER_TEMP/appcast.xml" appcast.xml
+          git add appcast.xml
+          git commit -m "chore: appcast for v$VERSION"
+          # Retry once if another push landed on main while this job ran.
+          git push origin main || { git pull --rebase origin main && git push origin main; }
