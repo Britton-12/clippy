@@ -24,6 +24,9 @@ final class ClipStore: ObservableObject {
     init(database: ClipDatabase) {
         self.database = database
         let limit = displayLimit
+        // Two observations on purpose: clips churn on every copy, while categories
+        // and membership change rarely; separating them avoids refetching the clip
+        // window for every category edit.
         // Recents window plus every categorized clip: categorized clips must
         // stay visible in their panes even when older than the window.
         let clipObservation = ValueObservation.tracking { db in

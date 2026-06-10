@@ -71,6 +71,11 @@ final class ClipDatabase {
                 t.column("addedAt", .datetime).notNull()
                 t.primaryKey(["clipID", "categoryID"])
             }
+            try db.create(indexOn: "clip_category", columns: ["clipID"])
+            // At most one starter category, enforced by the schema.
+            try db.execute(
+                sql: "CREATE UNIQUE INDEX category_single_starter ON category (isStarter) WHERE isStarter = 1"
+            )
             // Starter category receives every legacy pinned clip so nothing
             // is lost; users can rename or restyle it later.
             try db.execute(
@@ -99,8 +104,7 @@ final class ClipDatabase {
 
     /// Insert a freshly captured clip. A duplicate of an existing clip is not
     /// re-inserted; its timestamp is bumped so it surfaces at the top.
-    func saveCapturedClip(_ clip: inout Clip) throws {
-        let cap = AppSettings.shared.maxHistoryItems
+    func saveCapturedClip(_ clip: inout Clip, cap: Int = AppSettings.shared.maxHistoryItems) throws {
         let newClip = clip
         try dbQueue.write { db in
             if var existing = try Clip
@@ -121,6 +125,7 @@ final class ClipDatabase {
 
     /// Deletes uncategorized clips beyond the cap, oldest first. Clips in any
     /// category never count against the cap.
+    /// Returns evicted media filenames; empty until image clips land.
     @discardableResult
     static func evictOverCap(_ db: Database, cap: Int) throws -> [String] {
         guard cap > 0 else { return [] }
@@ -193,94 +198,11 @@ final class ClipDatabase {
         }
     }
 
-    // MARK: - Categories
+    // MARK: - Category state
 
-    func categories() throws -> [Category] {
-        try dbQueue.read { db in
-            try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
-        }
-    }
-
-    func starterCategory() throws -> Category? {
-        try dbQueue.read { db in
-            try Category.filter(Column("isStarter") == true).fetchOne(db)
-        }
-    }
-
-    @discardableResult
-    func createCategory(
-        named name: String,
-        colorHex: String,
-        iconKind: CategoryIconKind,
-        iconValue: String
-    ) throws -> Category {
-        try dbQueue.write { db in
-            let maxOrder = try Int.fetchOne(db, sql: "SELECT IFNULL(MAX(sortOrder), -1) FROM category") ?? -1
-            var category = Category(
-                id: nil,
-                name: name,
-                colorHex: colorHex,
-                iconKind: iconKind,
-                iconValue: iconValue,
-                sortOrder: maxOrder + 1,
-                isStarter: false,
-                createdAt: Date()
-            )
-            try category.insert(db)
-            return category
-        }
-    }
-
-    func updateCategory(_ category: Category) throws {
-        try dbQueue.write { db in
-            try category.update(db)
-        }
-    }
-
-    func deleteCategory(id: Int64) throws {
-        _ = try dbQueue.write { db in
-            try Category.deleteOne(db, key: id)
-        }
-    }
-
-    func setClip(_ clipID: Int64, inCategory categoryID: Int64, _ isMember: Bool) throws {
-        try dbQueue.write { db in
-            if isMember {
-                try db.execute(
-                    sql: "INSERT OR IGNORE INTO clip_category (clipID, categoryID, addedAt) VALUES (?, ?, ?)",
-                    arguments: [clipID, categoryID, Date()]
-                )
-            } else {
-                try db.execute(
-                    sql: "DELETE FROM clip_category WHERE clipID = ? AND categoryID = ?",
-                    arguments: [clipID, categoryID]
-                )
-            }
-        }
-    }
-
-    /// Cmd+P fast path: one keystroke toggles membership in the starter category.
-    func toggleStarterMembership(clipID: Int64) throws {
-        guard let starterID = try starterCategory()?.id else { return }
-        let isMember = try dbQueue.read { db in
-            try Bool.fetchOne(
-                db,
-                sql: "SELECT EXISTS(SELECT 1 FROM clip_category WHERE clipID = ? AND categoryID = ?)",
-                arguments: [clipID, starterID]
-            ) ?? false
-        }
-        try setClip(clipID, inCategory: starterID, !isMember)
-    }
-
-    /// clipID -> set of category IDs, for fast pinned/membership lookups in views.
-    func membershipMap() throws -> [Int64: Set<Int64>] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT clipID, categoryID FROM clip_category")
-            var map: [Int64: Set<Int64>] = [:]
-            for row in rows {
-                map[row["clipID"], default: []].insert(row["categoryID"])
-            }
-            return map
-        }
-    }
+    /// Cached after first lookup: the starter category is created in migration
+    /// v2 and never deleted, so its id is stable for the process lifetime.
+    /// Stored here because extensions cannot declare stored properties; the
+    /// category API lives in ClipDatabase+Categories.swift.
+    var cachedStarterCategoryID: Int64?
 }
