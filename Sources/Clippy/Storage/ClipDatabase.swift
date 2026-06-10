@@ -16,17 +16,17 @@ final class ClipDatabase {
     let dbQueue: DatabaseQueue
     let databaseURL: URL
 
-    init() throws {
+    init(databaseURL: URL? = nil) throws {
         let supportDir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Clippy", isDirectory: true)
         try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        databaseURL = supportDir.appendingPathComponent("clippy.sqlite")
-        dbQueue = try DatabaseQueue(path: databaseURL.path)
-        try migrator.migrate(dbQueue)
+        self.databaseURL = databaseURL ?? supportDir.appendingPathComponent("clippy.sqlite")
+        dbQueue = try DatabaseQueue(path: self.databaseURL.path)
+        try Self.makeMigrator().migrate(dbQueue)
     }
 
-    private var migrator: DatabaseMigrator {
+    static func makeMigrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1") { db in
             try db.create(table: "clips") { t in
