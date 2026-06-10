@@ -11,12 +11,6 @@ struct CategorySidePane: View {
     @State private var editingCategory: Category?
     @State private var isCreating = false
 
-    /// Distinct source apps seen in history, for the editor's App logos tab.
-    private var knownBundleIDs: [String] {
-        var seen = Set<String>()
-        return store.clips.compactMap(\.sourceAppBundleID).filter { seen.insert($0).inserted }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             historyRow
@@ -86,7 +80,7 @@ struct CategorySidePane: View {
                 set: { if !$0 { editingCategory = nil } }
             )
         ) {
-            CategoryEditorView(category: category, knownBundleIDs: knownBundleIDs) { name, colorHex, iconKind, iconValue in
+            CategoryEditorView(category: category, knownBundleIDs: store.knownBundleIDs) { name, colorHex, iconKind, iconValue in
                 var updated = category
                 updated.name = name
                 updated.colorHex = colorHex
@@ -115,7 +109,7 @@ struct CategorySidePane: View {
             isCreating = true
         }
         .popover(isPresented: $isCreating) {
-            CategoryEditorView(category: nil, knownBundleIDs: knownBundleIDs) { name, colorHex, iconKind, iconValue in
+            CategoryEditorView(category: nil, knownBundleIDs: store.knownBundleIDs) { name, colorHex, iconKind, iconValue in
                 store.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)
             }
         }

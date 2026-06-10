@@ -46,6 +46,11 @@ final class MediaStoreTests: XCTestCase {
         let stored = try store.store(pngData: makePNGData())
         let orphanURL = store.url(for: "orphan.png")
         try Data([0x1]).write(to: orphanURL)
+        // Backdate the orphan past the sweep's 60-second age guard.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -120)],
+            ofItemAtPath: orphanURL.path
+        )
 
         store.sweepOrphans(referencedFilenames: [stored.mediaFilename, stored.thumbFilename])
         XCTAssertFalse(FileManager.default.fileExists(atPath: orphanURL.path))

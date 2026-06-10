@@ -171,11 +171,26 @@ struct ClipCardView: View {
         .accessibilityLabel(help)
     }
 
+    /// Body re-evaluates often (hover, selection); thumbnails come from this
+    /// cache instead of disk after the first load.
+    private static let thumbnailCache = NSCache<NSString, NSImage>()
+
+    private static func thumbnail(for filename: String) -> NSImage? {
+        if let cached = thumbnailCache.object(forKey: filename as NSString) {
+            return cached
+        }
+        guard let image = NSImage(contentsOf: ClipDatabase.shared.media.url(for: filename)) else {
+            return nil
+        }
+        thumbnailCache.setObject(image, forKey: filename as NSString)
+        return image
+    }
+
     private var imagePreview: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Group {
                 if let filename = clip.thumbFilename,
-                   let nsImage = NSImage(contentsOf: ClipDatabase.shared.media.url(for: filename)) {
+                   let nsImage = Self.thumbnail(for: filename) {
                     Image(nsImage: nsImage)
                         .resizable()
                         .scaledToFill()

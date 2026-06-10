@@ -64,11 +64,17 @@ final class MediaStore {
     }
 
     /// Removes files no clip references (leftovers from a crash between file
-    /// write and row insert).
+    /// write and row insert). Files younger than a minute are spared: they may
+    /// belong to a capture whose database row is still in flight.
     func sweepOrphans(referencedFilenames: Set<String>) {
         let onDisk = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         for filename in onDisk where !referencedFilenames.contains(filename) {
-            try? FileManager.default.removeItem(at: url(for: filename))
+            let fileURL = url(for: filename)
+            if let modified = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               Date().timeIntervalSince(modified) < 60 {
+                continue
+            }
+            try? FileManager.default.removeItem(at: fileURL)
         }
     }
 

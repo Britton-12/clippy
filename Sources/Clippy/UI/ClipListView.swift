@@ -16,6 +16,7 @@ struct ClipListView: View {
 
     @State private var selection: PanelSelection = .history
     @State private var selectedIndex = 0
+    @State private var categoryCreationClip: Clip?
     @FocusState private var searchFocused: Bool
 
     /// Clips shown for the current selection, in keyboard-navigation order.
@@ -272,6 +273,21 @@ struct ClipListView: View {
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
         }
+        .popover(
+            isPresented: Binding(
+                get: { categoryCreationClip?.id == clip.id },
+                set: { if !$0 { categoryCreationClip = nil } }
+            )
+        ) {
+            CategoryEditorView(category: nil, knownBundleIDs: store.knownBundleIDs) { name, colorHex, iconKind, iconValue in
+                // Create the category and file the clip into it in one step.
+                if let created = store.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue),
+                   let categoryID = created.id,
+                   let clipID = clip.id {
+                    store.addClip(id: clipID, toCategory: categoryID)
+                }
+            }
+        }
     }
 
     private func categoriesMenu(for clip: Clip) -> some View {
@@ -289,6 +305,8 @@ struct ClipListView: View {
                     }
                 }
             }
+            Divider()
+            Button("New Category...") { categoryCreationClip = clip }
         }
     }
 

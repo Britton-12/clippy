@@ -74,6 +74,14 @@ final class ClipStore: ObservableObject {
         )
     }
 
+    // MARK: - Derived data
+
+    /// Distinct source apps seen in history, for category icon pickers.
+    var knownBundleIDs: [String] {
+        var seen = Set<String>()
+        return clips.compactMap(\.sourceAppBundleID).filter { seen.insert($0).inserted }
+    }
+
     // MARK: - Membership queries
 
     func isPinned(_ clip: Clip) -> Bool {
@@ -107,8 +115,9 @@ final class ClipStore: ObservableObject {
         try? database.setClip(clipID, inCategory: categoryID, true)
     }
 
-    func createCategory(named name: String, colorHex: String, iconKind: CategoryIconKind, iconValue: String) {
-        _ = try? database.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)
+    @discardableResult
+    func createCategory(named name: String, colorHex: String, iconKind: CategoryIconKind, iconValue: String) -> Category? {
+        try? database.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)
     }
 
     func updateCategory(_ category: Category) {
