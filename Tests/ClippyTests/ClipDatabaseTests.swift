@@ -1,5 +1,4 @@
 import XCTest
-import GRDB
 @testable import Clippy
 
 final class ClipDatabaseTests: XCTestCase {
