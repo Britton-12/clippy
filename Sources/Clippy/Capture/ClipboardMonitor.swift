@@ -75,10 +75,15 @@ final class ClipboardMonitor {
             return
         }
 
-        guard let text = pasteboard.string(forType: .string),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
+        if let text = pasteboard.string(forType: .string),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            captureText(text, from: frontApp)
+            return
+        }
+        captureImageIfPresent(from: frontApp)
+    }
 
+    private func captureText(_ text: String, from frontApp: NSRunningApplication?) {
         let rtf = pasteboard.data(forType: .rtf)
         let html = pasteboard.data(forType: .html)
         let typeIdentifier: String
@@ -105,5 +110,45 @@ final class ClipboardMonitor {
         } catch {
             NSLog("Clippy: failed to save clip: \(error)")
         }
+    }
+
+    /// Images are captured only when the pasteboard carries no text: a copied
+    /// picture, a screenshot, not a rich-text snippet that happens to embed one.
+    private func captureImageIfPresent(from frontApp: NSRunningApplication?) {
+        guard AppSettings.shared.captureImages,
+              let pngData = Self.pngData(from: pasteboard)
+        else { return }
+        guard pngData.count <= AppSettings.shared.maxImageSizeMB * 1_048_576 else { return }
+
+        do {
+            let stored = try database.media.store(pngData: pngData)
+            var clip = Clip(
+                id: nil,
+                contentText: "",
+                contentRTF: nil,
+                contentHTML: nil,
+                typeIdentifier: "public.png",
+                sourceAppBundleID: frontApp?.bundleIdentifier,
+                sourceAppName: frontApp?.localizedName,
+                createdAt: Date(),
+                contentKind: .image,
+                mediaFilename: stored.mediaFilename,
+                thumbFilename: stored.thumbFilename,
+                pixelWidth: stored.pixelWidth,
+                pixelHeight: stored.pixelHeight,
+                byteSize: stored.byteSize
+            )
+            try database.saveCapturedImageClip(&clip)
+        } catch {
+            NSLog("Clippy: failed to save image clip: \(error)")
+        }
+    }
+
+    private static func pngData(from pasteboard: NSPasteboard) -> Data? {
+        if let png = pasteboard.data(forType: .png) { return png }
+        guard let tiff = pasteboard.data(forType: .tiff),
+              let rep = NSBitmapImageRep(data: tiff)
+        else { return nil }
+        return rep.representation(using: .png, properties: [:])
     }
 }

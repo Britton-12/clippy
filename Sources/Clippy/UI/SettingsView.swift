@@ -198,6 +198,18 @@ private struct CaptureSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Images") {
+                Toggle("Capture copied images", isOn: $settings.captureImages)
+                Stepper(
+                    "Largest image to keep: \(settings.maxImageSizeMB) MB",
+                    value: $settings.maxImageSizeMB,
+                    in: 1...100
+                )
+                Text("Bigger copies are ignored to keep the history database lean.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Ignored apps") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bundle IDs, one per line (e.g. com.apple.keychainaccess)")

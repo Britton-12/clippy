@@ -22,17 +22,30 @@ final class PasteService {
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        if !asPlainText {
-            if let rtf = clip.contentRTF {
-                pasteboard.setData(rtf, forType: .rtf)
+        switch clip.contentKind {
+        case .image:
+            if let filename = clip.mediaFilename,
+               let data = try? Data(contentsOf: ClipDatabase.shared.media.url(for: filename)) {
+                pasteboard.setData(data, forType: .png)
+                // TIFF alongside PNG: some AppKit apps only read TIFF.
+                if let rep = NSBitmapImageRep(data: data),
+                   let tiff = rep.tiffRepresentation {
+                    pasteboard.setData(tiff, forType: .tiff)
+                }
             }
-            if let html = clip.contentHTML {
-                pasteboard.setData(html, forType: .html)
+        case .text:
+            if !asPlainText {
+                if let rtf = clip.contentRTF {
+                    pasteboard.setData(rtf, forType: .rtf)
+                }
+                if let html = clip.contentHTML {
+                    pasteboard.setData(html, forType: .html)
+                }
             }
+            // Plain text is set from the stored raw String, never round-tripped
+            // through attributed strings, so it comes back byte for byte.
+            pasteboard.setString(clip.contentText, forType: .string)
         }
-        // Plain text is set from the stored raw String, never round-tripped
-        // through attributed strings, so it comes back byte for byte.
-        pasteboard.setString(clip.contentText, forType: .string)
 
         // Small delay so the panel is gone and the previous app is key again.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {

@@ -42,6 +42,8 @@ final class AppSettings: ObservableObject {
         static let cardColorMode = "cardColorMode"
         static let showAppIcons = "showAppIcons"
         static let showSectionHeaders = "showSectionHeaders"
+        static let captureImages = "captureImages"
+        static let maxImageSizeMB = "maxImageSizeMB"
     }
 
     private let defaults: UserDefaults
@@ -91,6 +93,12 @@ final class AppSettings: ObservableObject {
     @Published var showSectionHeaders: Bool {
         didSet { defaults.set(showSectionHeaders, forKey: Keys.showSectionHeaders) }
     }
+    @Published var captureImages: Bool {
+        didSet { defaults.set(captureImages, forKey: Keys.captureImages) }
+    }
+    @Published var maxImageSizeMB: Int {
+        didSet { defaults.set(maxImageSizeMB, forKey: Keys.maxImageSizeMB) }
+    }
 
     var accentColor: Color { accentTheme.color }
 
@@ -118,7 +126,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         defaults.register(defaults: [
             Keys.positionMode: PanelPositionMode.caret.rawValue,
-            Keys.panelWidth: 420.0,
+            Keys.panelWidth: 640.0,
             Keys.panelHeight: 480.0,
             Keys.rememberPanelSize: true,
             Keys.pollingIntervalMs: 200.0,
@@ -132,6 +140,8 @@ final class AppSettings: ObservableObject {
             Keys.cardColorMode: CardColorMode.byApp.rawValue,
             Keys.showAppIcons: true,
             Keys.showSectionHeaders: true,
+            Keys.captureImages: true,
+            Keys.maxImageSizeMB: 20,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
         panelWidth = defaults.double(forKey: Keys.panelWidth)
@@ -148,5 +158,7 @@ final class AppSettings: ObservableObject {
         cardColorMode = CardColorMode(rawValue: defaults.string(forKey: Keys.cardColorMode) ?? "") ?? .byApp
         showAppIcons = defaults.bool(forKey: Keys.showAppIcons)
         showSectionHeaders = defaults.bool(forKey: Keys.showSectionHeaders)
+        captureImages = defaults.bool(forKey: Keys.captureImages)
+        maxImageSizeMB = defaults.integer(forKey: Keys.maxImageSizeMB)
     }
 }
