@@ -34,9 +34,23 @@ final class ImageClipTests: XCTestCase {
         _ = try storeImage(db, data: png)
         let clip = try XCTUnwrap(db.allClips().first)
         let mediaURL = db.media.url(for: try XCTUnwrap(clip.mediaFilename))
+        let thumbURL = db.media.url(for: try XCTUnwrap(clip.thumbFilename))
 
         try db.deleteClip(id: try XCTUnwrap(clip.id))
         XCTAssertFalse(FileManager.default.fileExists(atPath: mediaURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: thumbURL.path))
+    }
+
+    func testReferencedMediaFilenamesListsBothFiles() throws {
+        let db = try makeTestDatabase(self)
+        let png = MediaStoreTests().makePNGData()
+        _ = try storeImage(db, data: png)
+        let clip = try XCTUnwrap(db.allClips().first)
+        let referenced = try db.referencedMediaFilenames()
+        XCTAssertEqual(referenced, [
+            try XCTUnwrap(clip.mediaFilename),
+            try XCTUnwrap(clip.thumbFilename),
+        ])
     }
 
     func testCapEvictionRemovesMediaFiles() throws {

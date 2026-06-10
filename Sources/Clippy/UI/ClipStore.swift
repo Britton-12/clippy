@@ -108,7 +108,7 @@ final class ClipStore: ObservableObject {
     }
 
     func createCategory(named name: String, colorHex: String, iconKind: CategoryIconKind, iconValue: String) {
-        try? database.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)
+        _ = try? database.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)
     }
 
     func updateCategory(_ category: Category) {

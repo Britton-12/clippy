@@ -26,6 +26,8 @@ final class ClipboardMonitor {
         self.database = database
     }
 
+    // MARK: - Timer and polling
+
     func start() {
         lastChangeCount = pasteboard.changeCount
         scheduleTimer()
@@ -64,6 +66,8 @@ final class ClipboardMonitor {
         guard !isPaused else { return }
         captureCurrentPasteboard()
     }
+
+    // MARK: - Text capture
 
     private func captureCurrentPasteboard() {
         guard let types = pasteboard.types, !types.isEmpty else { return }
@@ -112,6 +116,8 @@ final class ClipboardMonitor {
         }
     }
 
+    // MARK: - Image capture
+
     /// Images are captured only when the pasteboard carries no text: a copied
     /// picture, a screenshot, not a rich-text snippet that happens to embed one.
     private func captureImageIfPresent(from frontApp: NSRunningApplication?) {
@@ -146,9 +152,10 @@ final class ClipboardMonitor {
 
     private static func pngData(from pasteboard: NSPasteboard) -> Data? {
         if let png = pasteboard.data(forType: .png) { return png }
-        guard let tiff = pasteboard.data(forType: .tiff),
-              let rep = NSBitmapImageRep(data: tiff)
-        else { return nil }
+        guard let tiff = pasteboard.data(forType: .tiff) else { return nil }
+        // TIFF is rarely more than ~4x the eventual PNG; skip decoding clearly-over-cap data.
+        guard tiff.count <= AppSettings.shared.maxImageSizeMB * 4_194_304 else { return nil }
+        guard let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
 }

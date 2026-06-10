@@ -236,7 +236,7 @@ final class ClipDatabase {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(
                 db,
-                sql: "SELECT mediaFilename, thumbFilename FROM clips WHERE mediaFilename IS NOT NULL"
+                sql: "SELECT mediaFilename, thumbFilename FROM clips WHERE mediaFilename IS NOT NULL OR thumbFilename IS NOT NULL"
             )
             var names = Set<String>()
             for row in rows {
