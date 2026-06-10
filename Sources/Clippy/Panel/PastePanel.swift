@@ -1,0 +1,14 @@
+import AppKit
+
+/// Borderless, nonactivating floating panel. It can take keyboard focus for
+/// the search field without activating Clippy, so the frontmost app keeps
+/// its active state and receives the simulated Cmd-V after selection.
+final class PastePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        // Escape anywhere in the panel closes it.
+        orderOut(nil)
+    }
+}

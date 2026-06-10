@@ -1,0 +1,41 @@
+# Deny everything first
+*
+/**
+/.*
+/.*/
+.DS_Store
+
+# Global sensitive-file protection
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.sqlite
+*.dump
+*.bak
+
+# Allowlisted project content
+!.gitignore
+!README.md
+!Package.swift
+!Package.resolved
+!clipboard-manager-stack-decision.md
+!Sources/
+!Sources/**
+!Tests/
+!Tests/**
+!docs/
+!docs/**
+!scripts/
+!scripts/**
+
+# Re-exclude generated artifacts (must come after allowlist)
+.build/
+build/
+**/.DS_Store
+
+# Pre-commit verification:
+#   1. git status            # nothing unexpected staged?
+#   2. git ls-files | grep -E '\.(env|key|pem|sqlite)$'   # must be empty
