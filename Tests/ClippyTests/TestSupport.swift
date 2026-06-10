@@ -10,7 +10,10 @@ func makeTestDatabase(_ testCase: XCTestCase) throws -> ClipDatabase {
     testCase.addTeardownBlock {
         try? FileManager.default.removeItem(at: dir)
     }
-    return try ClipDatabase(databaseURL: dir.appendingPathComponent("test.sqlite"))
+    return try ClipDatabase(
+        databaseURL: dir.appendingPathComponent("test.sqlite"),
+        mediaDirectory: dir.appendingPathComponent("media", isDirectory: true)
+    )
 }
 
 func makeTextClip(_ text: String, createdAt: Date = Date()) -> Clip {
