@@ -8,6 +8,7 @@ enum ClipKind: Equatable {
     case email
     case colorValue(Color)
     case filePath
+    case image
     case text
 
     static func detect(_ rawText: String) -> ClipKind {
@@ -46,6 +47,7 @@ enum ClipKind: Equatable {
         case .email: return "envelope"
         case .colorValue: return "paintpalette"
         case .filePath: return "folder"
+        case .image: return "photo"
         case .text: return "text.alignleft"
         }
     }
@@ -56,6 +58,7 @@ enum ClipKind: Equatable {
         case .email: return "Email"
         case .colorValue: return "Color"
         case .filePath: return "File path"
+        case .image: return "Image"
         case .text: return "Text"
         }
     }
@@ -66,6 +69,7 @@ enum ClipKind: Equatable {
         case .email: return Color(nsColor: .systemTeal)
         case .colorValue(let color): return color
         case .filePath: return Color(nsColor: .systemBrown)
+        case .image: return Color(nsColor: .systemPurple)
         case .text: return Color(nsColor: .systemGray)
         }
     }
@@ -73,7 +77,7 @@ enum ClipKind: Equatable {
     // MARK: - Color parsing
 
     /// #RGB, #RRGGBB, or #RRGGBBAA.
-    private static func parseHexColor(_ text: String) -> Color? {
+    static func parseHexColor(_ text: String) -> Color? {
         guard text.hasPrefix("#") else { return nil }
         let hex = String(text.dropFirst())
         guard [3, 6, 8].contains(hex.count), hex.allSatisfy(\.isHexDigit) else { return nil }
@@ -109,6 +113,6 @@ enum ClipKind: Equatable {
 
 extension Clip {
     var kind: ClipKind {
-        ClipKind.detect(contentText)
+        contentKind == .image ? .image : ClipKind.detect(contentText)
     }
 }

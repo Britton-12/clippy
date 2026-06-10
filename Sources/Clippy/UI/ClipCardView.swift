@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// One clipboard item rendered as a card: colored edge stripe (per-app or
-/// per-kind tint), source app icon, content-type badge, preview text, and
-/// hover-revealed quick actions. Selection draws an accent ring.
+/// per-kind tint), source app icon, content-type badge, preview text or image
+/// thumbnail, and hover-revealed quick actions. Selection draws an accent ring.
 struct ClipCardView: View {
     let clip: Clip
     let isSelected: Bool
     let isPinned: Bool
+    /// Colors of the categories this clip belongs to (first three shown as dots).
+    let categoryColors: [Color]
 
     let onPaste: () -> Void
     let onPastePlain: () -> Void
@@ -19,6 +21,7 @@ struct ClipCardView: View {
     @State private var isHovering = false
 
     private var kind: ClipKind { clip.kind }
+    private var isImage: Bool { clip.contentKind == .image }
 
     private var cardColor: Color {
         switch settings.cardColorMode {
@@ -42,11 +45,15 @@ struct ClipCardView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 headerRow
-                Text(clip.previewText)
-                    .font(.system(size: 12.5))
-                    .lineLimit(3)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if isImage {
+                    imagePreview
+                } else {
+                    Text(clip.previewText)
+                        .font(.system(size: 12.5))
+                        .lineLimit(3)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 if case .colorValue(let swatch) = kind {
                     swatchRow(swatch)
                 }
@@ -68,6 +75,15 @@ struct ClipCardView: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(kind.label)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var accessibilitySummary: String {
+        let source = clip.sourceAppName ?? "Unknown app"
+        let content = isImage ? "Image" : clip.previewText
+        return "\(source), \(kind.label), \(content)\(isPinned ? ", pinned" : "")"
     }
 
     // MARK: - Pieces
@@ -80,7 +96,7 @@ struct ClipCardView: View {
                     .frame(width: 16, height: 16)
             } else {
                 Image(systemName: "app.dashed")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(width: 16, height: 16)
             }
@@ -97,36 +113,43 @@ struct ClipCardView: View {
                 trailingMetadata
             }
         }
-        .frame(height: 18)
+        .frame(height: 20)
     }
 
     private var trailingMetadata: some View {
         HStack(spacing: 6) {
+            ForEach(Array(categoryColors.prefix(3).enumerated()), id: \.offset) { _, color in
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+            }
             Image(systemName: kind.iconName)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(kind.tint)
             if clip.isRich {
                 Image(systemName: "textformat")
-                    .font(.system(size: 9))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .help("Has rich formatting")
             }
             if isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 12))
+                    .foregroundStyle(settings.accentColor)
             }
             Text(clip.createdAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
     }
 
     private var hoverActions: some View {
         HStack(spacing: 2) {
-            cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
-            cardActionButton("pencil", help: "Edit", action: onEdit)
+            if !isImage {
+                cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
+                cardActionButton("pencil", help: "Edit", action: onEdit)
+            }
             cardActionButton(
                 isPinned ? "pin.slash" : "pin",
                 help: isPinned ? "Unpin" : "Pin",
@@ -139,12 +162,39 @@ struct ClipCardView: View {
     private func cardActionButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 10, weight: .medium))
-                .frame(width: 20, height: 18)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 24, height: 20)
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private var imagePreview: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Group {
+                if let filename = clip.thumbFilename,
+                   let nsImage = NSImage(contentsOf: ClipDatabase.shared.media.url(for: filename)) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: 220, maxHeight: 72, alignment: .topLeading)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else {
+                    Image(systemName: "photo")
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 72, height: 48)
+                }
+            }
+            if let width = clip.pixelWidth, let height = clip.pixelHeight {
+                Text("\(width)x\(height) PNG")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
     }
 
     private func swatchRow(_ swatch: Color) -> some View {
@@ -164,7 +214,8 @@ struct ClipCardView: View {
 
     private var cardBackground: some View {
         ZStack {
-            Color(nsColor: .controlBackgroundColor).opacity(0.55)
+            // Mostly opaque backing keeps text contrast safe on glass materials.
+            Color(nsColor: .controlBackgroundColor).opacity(0.78)
             // Whisper of the identity color so cards differ beyond the stripe.
             LinearGradient(
                 colors: [cardColor.opacity(isHovering ? 0.16 : 0.08), .clear],

@@ -89,7 +89,7 @@ struct ClipListView: View {
                 }
                 .onKeyPress(.escape) { onClose(); return .handled }
                 .onKeyPress(keys: ["e"]) { press in
-                    guard press.modifiers.contains(.command), let clip = selectedClip else { return .ignored }
+                    guard press.modifiers.contains(.command), let clip = selectedClip, clip.contentKind == .text else { return .ignored }
                     onEdit(clip)
                     return .handled
                 }
@@ -251,6 +251,12 @@ struct ClipListView: View {
             clip: clip,
             isSelected: index == selectedIndex,
             isPinned: store.isPinned(clip),
+            categoryColors: store.categories
+                .filter { category in
+                    guard let id = category.id else { return false }
+                    return store.categoryIDs(for: clip).contains(id)
+                }
+                .map { ClipKind.parseHexColor($0.colorHex) ?? Color(nsColor: .systemGray) },
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onEdit: { onEdit(clip) },
@@ -261,9 +267,13 @@ struct ClipListView: View {
         .onTapGesture { onPaste(clip, settings.pastePlainTextByDefault) }
         .contextMenu {
             Button("Paste") { onPaste(clip, false) }
-            Button("Paste as Plain Text") { onPaste(clip, true) }
+            if clip.contentKind == .text {
+                Button("Paste as Plain Text") { onPaste(clip, true) }
+            }
             Divider()
-            Button("Edit...") { onEdit(clip) }
+            if clip.contentKind == .text {
+                Button("Edit...") { onEdit(clip) }
+            }
             Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
