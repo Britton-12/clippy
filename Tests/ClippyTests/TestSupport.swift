@@ -16,6 +16,25 @@ func makeTestDatabase(_ testCase: XCTestCase) throws -> ClipDatabase {
     )
 }
 
+func makeImageClip(_ stored: MediaStore.StoredImage, createdAt: Date = Date()) -> Clip {
+    Clip(
+        id: nil,
+        contentText: "",
+        contentRTF: nil,
+        contentHTML: nil,
+        typeIdentifier: "public.png",
+        sourceAppBundleID: "com.example.test",
+        sourceAppName: "TestApp",
+        createdAt: createdAt,
+        contentKind: .image,
+        mediaFilename: stored.mediaFilename,
+        thumbFilename: stored.thumbFilename,
+        pixelWidth: stored.pixelWidth,
+        pixelHeight: stored.pixelHeight,
+        byteSize: stored.byteSize
+    )
+}
+
 func makeTextClip(_ text: String, createdAt: Date = Date()) -> Clip {
     Clip(
         id: nil,

@@ -102,6 +102,16 @@ final class ClipDatabase {
                 t.drop(column: "isPinned")
             }
         }
+        migrator.registerMigration("v3-image-clips") { db in
+            try db.alter(table: "clips") { t in
+                t.add(column: "contentKind", .text).notNull().defaults(to: "text")
+                t.add(column: "mediaFilename", .text)
+                t.add(column: "thumbFilename", .text)
+                t.add(column: "pixelWidth", .integer)
+                t.add(column: "pixelHeight", .integer)
+                t.add(column: "byteSize", .integer)
+            }
+        }
         return migrator
     }
 
@@ -111,9 +121,11 @@ final class ClipDatabase {
     /// re-inserted; its timestamp is bumped so it surfaces at the top.
     func saveCapturedClip(_ clip: inout Clip, cap: Int = AppSettings.shared.maxHistoryItems) throws {
         let newClip = clip
+        var evicted: [String] = []
         try dbQueue.write { db in
             if var existing = try Clip
                 .filter(Column("contentText") == newClip.contentText)
+                .filter(Column("contentKind") == ClipContentKind.text.rawValue)
                 .fetchOne(db)
             {
                 existing.createdAt = newClip.createdAt
@@ -124,30 +136,63 @@ final class ClipDatabase {
             }
             var inserting = newClip
             try inserting.insert(db)
-            try Self.evictOverCap(db, cap: cap)
+            evicted = try Self.evictOverCap(db, cap: cap)
         }
+        media.delete(filenames: evicted)
     }
 
-    /// Deletes uncategorized clips beyond the cap, oldest first. Clips in any
-    /// category never count against the cap.
-    /// Returns evicted media filenames; empty until image clips land.
+    /// Insert a captured image clip. Media files are written by MediaStore
+    /// BEFORE this runs. Dedupe key is the content-hash filename; a re-copy
+    /// bumps the timestamp.
+    func saveCapturedImageClip(_ clip: inout Clip, cap: Int = AppSettings.shared.maxHistoryItems) throws {
+        let newClip = clip
+        var evicted: [String] = []
+        try dbQueue.write { db in
+            if var existing = try Clip
+                .filter(Column("mediaFilename") == newClip.mediaFilename)
+                .fetchOne(db)
+            {
+                existing.createdAt = newClip.createdAt
+                existing.sourceAppBundleID = newClip.sourceAppBundleID
+                existing.sourceAppName = newClip.sourceAppName
+                try existing.update(db)
+                return
+            }
+            var inserting = newClip
+            try inserting.insert(db)
+            evicted = try Self.evictOverCap(db, cap: cap)
+        }
+        media.delete(filenames: evicted)
+    }
+
+    /// Deletes uncategorized clips beyond the cap, oldest first, and returns
+    /// the media filenames of evicted image clips so callers can remove files.
+    /// Clips in any category never count against the cap.
     @discardableResult
     static func evictOverCap(_ db: Database, cap: Int) throws -> [String] {
         guard cap > 0 else { return [] }
-        try db.execute(
-            sql: """
-                DELETE FROM clips
+        let doomedSQL = """
+            SELECT id FROM clips
+            WHERE id NOT IN (SELECT clipID FROM clip_category)
+            AND id NOT IN (
+                SELECT id FROM clips
                 WHERE id NOT IN (SELECT clipID FROM clip_category)
-                AND id NOT IN (
-                    SELECT id FROM clips
-                    WHERE id NOT IN (SELECT clipID FROM clip_category)
-                    ORDER BY createdAt DESC, id DESC
-                    LIMIT ?
-                )
-                """,
-            arguments: [cap]
+                ORDER BY createdAt DESC, id DESC
+                LIMIT \(cap)
+            )
+            """
+        let filenames = try String.fetchAll(
+            db,
+            sql: """
+                SELECT mediaFilename FROM clips
+                WHERE mediaFilename IS NOT NULL AND id IN (\(doomedSQL))
+                UNION ALL
+                SELECT thumbFilename FROM clips
+                WHERE thumbFilename IS NOT NULL AND id IN (\(doomedSQL))
+                """
         )
-        return []
+        try db.execute(sql: "DELETE FROM clips WHERE id IN (\(doomedSQL))")
+        return filenames
     }
 
     /// User edited the text in the plain-text editor. The original rich blobs
@@ -167,14 +212,38 @@ final class ClipDatabase {
     }
 
     func deleteClip(id: Int64) throws {
-        _ = try dbQueue.write { db in
+        let filenames: [String] = try dbQueue.write { db in
+            let clip = try Clip.fetchOne(db, key: id)
             try Clip.deleteOne(db, key: id)
+            return clip?.mediaFilenames ?? []
         }
+        media.delete(filenames: filenames)
     }
 
     func deleteUnclassifiedClips() throws {
-        try dbQueue.write { db in
+        let filenames: [String] = try dbQueue.write { db in
+            let doomed = try Clip
+                .filter(sql: "id NOT IN (SELECT clipID FROM clip_category)")
+                .fetchAll(db)
             try db.execute(sql: "DELETE FROM clips WHERE id NOT IN (SELECT clipID FROM clip_category)")
+            return doomed.flatMap(\.mediaFilenames)
+        }
+        media.delete(filenames: filenames)
+    }
+
+    /// Every media filename any clip references, for the launch orphan sweep.
+    func referencedMediaFilenames() throws -> Set<String> {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT mediaFilename, thumbFilename FROM clips WHERE mediaFilename IS NOT NULL"
+            )
+            var names = Set<String>()
+            for row in rows {
+                if let m: String = row["mediaFilename"] { names.insert(m) }
+                if let t: String = row["thumbFilename"] { names.insert(t) }
+            }
+            return names
         }
     }
 

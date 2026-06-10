@@ -17,6 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         monitor.start()
 
+        // Crash between media write and row insert leaves orphan files;
+        // sweep them off the main thread at launch.
+        DispatchQueue.global(qos: .utility).async {
+            let referenced = (try? ClipDatabase.shared.referencedMediaFilenames()) ?? []
+            ClipDatabase.shared.media.sweepOrphans(referencedFilenames: referenced)
+        }
+
         HotKeyCenter.shared.handler = { [weak self] in
             self?.panelController.toggle()
         }
