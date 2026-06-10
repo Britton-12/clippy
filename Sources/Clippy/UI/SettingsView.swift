@@ -309,10 +309,16 @@ private struct IntegrationsSettingsTab: View {
     private func exportJSON() {
         struct ExportClip: Encodable {
             let text: String
+            let kind: String
+            let mediaFile: String?
             let sourceApp: String?
             let sourceBundleID: String?
             let createdAt: Date
-            let pinned: Bool
+            let categories: [String]
+        }
+        struct ExportDocument: Encodable {
+            let note: String
+            let clips: [ExportClip]
         }
 
         let panel = NSSavePanel()
@@ -321,21 +327,35 @@ private struct IntegrationsSettingsTab: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            // Pinned is derived under the category model: in at least one category.
-            let membership = try ClipDatabase.shared.membershipMap()
-            let clips = try ClipDatabase.shared.allClips().map { clip in
+            let database = ClipDatabase.shared
+            let categories = try database.categories()
+            let membership = try database.membershipMap()
+            let nameByID = Dictionary(
+                uniqueKeysWithValues: categories.compactMap { category in
+                    category.id.map { ($0, category.name) }
+                }
+            )
+            let clips = try database.allClips().map { clip in
                 ExportClip(
                     text: clip.contentText,
+                    kind: clip.contentKind.rawValue,
+                    mediaFile: clip.mediaFilename.map { database.media.url(for: $0).path },
                     sourceApp: clip.sourceAppName,
                     sourceBundleID: clip.sourceAppBundleID,
                     createdAt: clip.createdAt,
-                    pinned: clip.id.map { !(membership[$0] ?? []).isEmpty } ?? false
+                    categories: (clip.id.flatMap { membership[$0] } ?? [])
+                        .compactMap { nameByID[$0] }
+                        .sorted()
                 )
             }
+            let document = ExportDocument(
+                note: "Image clips reference PNG files under the Clippy media folder; copy them separately if you need a portable backup.",
+                clips: clips
+            )
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(clips).write(to: url)
+            try encoder.encode(document).write(to: url)
             exportResult = "Exported \(clips.count) clips to \(url.lastPathComponent)."
         } catch {
             exportResult = "Export failed: \(error.localizedDescription)"
