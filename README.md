@@ -1,16 +1,20 @@
-# Clippy
+<div align="center" style="font-size: 2.5em; font-weight: bold; margin-bottom: 0.25em;">
+Clippy
+</div>
 
-![Clippy Logo](img/Clippy.png)
+<div align="center">
+  <img src="img/Clippy.png" width="33%" alt="Clippy Logo">
+</div>
 
-![Clippy main window](img/clippy_main_window.png)
+#
+
+A modern clipboard manager for power users who want more from their copy-paste workflow, without sacrificing privacy or performance.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-0ea5e9?style=for-the-badge&logo=apple&logoColor=white)
 ![Swift 6](https://img.shields.io/badge/Swift-6-f97316?style=for-the-badge&logo=swift&logoColor=white)
 ![SQLite FTS5](https://img.shields.io/badge/SQLite-FTS5-0f766e?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Sparkle updates](https://img.shields.io/badge/Sparkle-Auto%20Update-22c55e?style=for-the-badge)
 ![Privacy local only](https://img.shields.io/badge/Privacy-Local%20Only-a855f7?style=for-the-badge)
-
-Native macOS clipboard manager that opens at the text cursor, not at the edge of your screen.
 
 ## Visual Tour
 
