@@ -142,6 +142,20 @@ final class ClipStore: ObservableObject {
         try? database.updateClipText(id: id, newText: newText)
     }
 
+    func renameClip(_ clip: Clip, userTitle: String?) {
+        guard let id = clip.id else { return }
+        // Treat empty string the same as nil (clear the custom title).
+        let trimmed = userTitle.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        try? database.updateClipTitle(id: id, userTitle: trimmed?.isEmpty == true ? nil : trimmed)
+    }
+
+    /// The first category this clip belongs to, ordered by (sortOrder, createdAt).
+    /// Used to pick the icon and accent color for pinned cards.
+    func firstCategory(for clip: Clip) -> Category? {
+        let ids = categoryIDs(for: clip)
+        return categories.first { $0.id.map { ids.contains($0) } ?? false }
+    }
+
     private func refilter() {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {

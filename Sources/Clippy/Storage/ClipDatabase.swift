@@ -112,6 +112,29 @@ final class ClipDatabase {
                 t.add(column: "byteSize", .integer)
             }
         }
+        migrator.registerMigration("v4-user-titles") { db in
+            // Add the nullable userTitle column; existing rows stay NULL which
+            // makes them fall back to sourceAppName in the UI (no data loss).
+            try db.alter(table: "clips") { t in
+                t.add(column: "userTitle", .text)
+            }
+            // FTS5 synchronized tables cannot have columns added after creation,
+            // so drop and recreate the virtual table to pick up userTitle.
+            // GRDB's synchronize() creates three triggers on the content table;
+            // they must be dropped explicitly before the FTS table is removed,
+            // otherwise the subsequent CREATE VIRTUAL TABLE will try to create
+            // them again and hit "trigger already exists".
+            try db.execute(sql: "DROP TRIGGER IF EXISTS \"__clips_fts_ai\"")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS \"__clips_fts_ad\"")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS \"__clips_fts_au\"")
+            try db.execute(sql: "DROP TABLE IF EXISTS clips_fts")
+            try db.create(virtualTable: "clips_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "clips")
+                t.tokenizer = .unicode61()
+                t.column("contentText")
+                t.column("userTitle")
+            }
+        }
         return migrator
     }
 
@@ -207,6 +230,17 @@ final class ClipDatabase {
                     WHERE id = ?
                     """,
                 arguments: [newText, id]
+            )
+        }
+    }
+
+    /// Persists a user-assigned display name. Pass nil to clear the custom title
+    /// and revert to showing the source app name in the card header.
+    func updateClipTitle(id: Int64, userTitle: String?) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE clips SET userTitle = ? WHERE id = ?",
+                arguments: [userTitle, id]
             )
         }
     }

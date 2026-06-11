@@ -9,21 +9,65 @@ struct ClipCardView: View {
     let isPinned: Bool
     /// Colors of the categories this clip belongs to (first three shown as dots).
     let categoryColors: [Color]
+    /// First category the clip belongs to (by sortOrder/createdAt). When set,
+    /// its icon replaces the app icon and its color overrides the stripe color.
+    let pinnedCategory: Category?
 
     let onPaste: () -> Void
     let onPastePlain: () -> Void
     let onEdit: () -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
+    /// Called when the user commits a rename. Receives nil to clear a custom
+    /// title and revert to the source app name.
+    let onRename: (String?) -> Void
 
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    /// Whether the title field is in inline-edit mode. Driven by the parent via
+    /// isRenamingBinding so context-menu "Rename..." can trigger it externally.
+    @Binding var isRenaming: Bool
+    /// Draft text while the user is typing; committed on Return or focus loss.
+    @State private var renameText = ""
+
+    /// Convenience init for callers that do not need external rename control.
+    init(
+        clip: Clip,
+        isSelected: Bool,
+        isPinned: Bool,
+        categoryColors: [Color],
+        pinnedCategory: Category?,
+        isRenaming: Binding<Bool> = .constant(false),
+        onPaste: @escaping () -> Void,
+        onPastePlain: @escaping () -> Void,
+        onEdit: @escaping () -> Void,
+        onTogglePin: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        onRename: @escaping (String?) -> Void
+    ) {
+        self.clip = clip
+        self.isSelected = isSelected
+        self.isPinned = isPinned
+        self.categoryColors = categoryColors
+        self.pinnedCategory = pinnedCategory
+        self._isRenaming = isRenaming
+        self.onPaste = onPaste
+        self.onPastePlain = onPastePlain
+        self.onEdit = onEdit
+        self.onTogglePin = onTogglePin
+        self.onDelete = onDelete
+        self.onRename = onRename
+    }
 
     private var kind: ClipKind { clip.kind }
     private var isImage: Bool { clip.contentKind == .image }
 
     private var cardColor: Color {
+        // Pinned cards take the category color regardless of the global setting.
+        if let category = pinnedCategory {
+            return Color(hexString: category.colorHex)
+        }
         switch settings.cardColorMode {
         case .byApp:
             return AppIconProvider.shared.dominantColor(forBundleID: clip.sourceAppBundleID) ?? kind.tint
@@ -38,10 +82,12 @@ struct ClipCardView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Color identity stripe.
-            Rectangle()
-                .fill(cardColor)
-                .frame(width: 4)
+            // Color identity stripe; hidden in plain style (no chrome at all).
+            if settings.cardStyle != .plain {
+                Rectangle()
+                    .fill(cardColor)
+                    .frame(width: 4)
+            }
 
             VStack(alignment: .leading, spacing: 5) {
                 headerRow
@@ -49,9 +95,9 @@ struct ClipCardView: View {
                     imagePreview
                 } else {
                     Text(clip.previewText)
-                        .font(.system(size: 12.5))
+                        .font(PanelTypography.body(settings))
                         .lineLimit(3)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if case .colorValue(let swatch) = kind {
@@ -65,10 +111,7 @@ struct ClipCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(
-                    isSelected ? settings.accentColor : Color(nsColor: .separatorColor).opacity(0.5),
-                    lineWidth: isSelected ? 2 : 1
-                )
+                .strokeBorder(cardBorderColor, lineWidth: isSelected ? 2 : 1)
         )
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
@@ -81,29 +124,21 @@ struct ClipCardView: View {
     }
 
     private var accessibilitySummary: String {
-        let source = clip.sourceAppName ?? "Unknown app"
         let content = isImage ? "Image" : clip.previewText
-        return "\(source), \(kind.label), \(content)\(isPinned ? ", pinned" : "")"
+        return "\(clip.displayTitle), \(kind.label), \(content)\(isPinned ? ", pinned" : "")"
     }
 
     // MARK: - Pieces
 
     private var headerRow: some View {
         HStack(spacing: 6) {
-            if settings.showAppIcons, let icon = AppIconProvider.shared.icon(forBundleID: clip.sourceAppBundleID) {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 16, height: 16)
+            leadingIcon
+
+            if isRenaming {
+                titleEditor
             } else {
-                Image(systemName: "app.dashed")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
+                titleLabel
             }
-            Text(clip.sourceAppName ?? "Unknown app")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
 
             Spacer(minLength: 4)
 
@@ -114,6 +149,84 @@ struct ClipCardView: View {
             }
         }
         .frame(height: 20)
+    }
+
+    /// Icon slot: shows the pinned category's icon when the clip is categorized,
+    /// otherwise the source app icon (or a placeholder when icons are off).
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if let category = pinnedCategory {
+            categoryIcon(category)
+                .frame(width: 16, height: 16)
+        } else if settings.showAppIcons,
+                  let icon = AppIconProvider.shared.icon(forBundleID: clip.sourceAppBundleID) {
+            Image(nsImage: icon)
+                .resizable()
+                .frame(width: 16, height: 16)
+        } else {
+            Image(systemName: "app.dashed")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+        }
+    }
+
+    /// Renders any of the three category icon kinds, matching CategorySidePane.
+    @ViewBuilder
+    private func categoryIcon(_ category: Category) -> some View {
+        switch category.iconKind {
+        case .symbol:
+            Image(systemName: category.iconValue)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(hexString: category.colorHex))
+        case .emoji:
+            Text(category.iconValue)
+                .font(.system(size: 13))
+        case .appLogo:
+            if let icon = AppIconProvider.shared.icon(forBundleID: category.iconValue) {
+                Image(nsImage: icon).resizable()
+            } else {
+                Image(systemName: "app.dashed")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// The title text shown in normal (non-editing) state.
+    private var titleLabel: some View {
+        Text(clip.displayTitle)
+            .font(PanelTypography.title(settings))
+            .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .lineLimit(1)
+            .onTapGesture(count: 2) { beginRename() }
+    }
+
+    /// Inline text field shown while the user is renaming.
+    private var titleEditor: some View {
+        TextField("Title", text: $renameText)
+            .font(PanelTypography.title(settings))
+            .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .textFieldStyle(.plain)
+            .onSubmit { commitRename() }
+            // Escape key cancels without saving.
+            .onExitCommand { cancelRename() }
+            .onAppear { renameText = clip.userTitle ?? "" }
+    }
+
+    private func beginRename() {
+        renameText = clip.userTitle ?? ""
+        isRenaming = true
+    }
+
+    private func commitRename() {
+        isRenaming = false
+        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        onRename(trimmed.isEmpty ? nil : trimmed)
+    }
+
+    private func cancelRename() {
+        isRenaming = false
     }
 
     private var trailingMetadata: some View {
@@ -138,7 +251,7 @@ struct ClipCardView: View {
                     .foregroundStyle(settings.accentColor)
             }
             Text(clip.createdAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
-                .font(.caption)
+                .font(PanelTypography.metadata(settings))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
@@ -150,6 +263,7 @@ struct ClipCardView: View {
                 cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
                 cardActionButton("pencil", help: "Edit", action: onEdit)
             }
+            cardActionButton("character.cursor.ibeam", help: "Rename", action: beginRename)
             cardActionButton(
                 isPinned ? "pin.slash" : "pin",
                 help: isPinned ? "Unpin" : "Pin",
@@ -205,7 +319,7 @@ struct ClipCardView: View {
             }
             if let width = clip.pixelWidth, let height = clip.pixelHeight {
                 Text("\(width)x\(height) PNG")
-                    .font(.caption2)
+                    .font(PanelTypography.micro(settings))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -222,24 +336,57 @@ struct ClipCardView: View {
                         .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             Text("Color value")
-                .font(.caption2)
+                .font(PanelTypography.micro(settings))
                 .foregroundStyle(.secondary)
         }
     }
 
+    /// Tint fraction as a 0-1 Double from the 0-20 integer setting.
+    private var tintFraction: Double {
+        Double(settings.cardTintStrength) / 100.0
+    }
+
+    private var cardBorderColor: Color {
+        if isSelected { return settings.accentColor }
+        switch settings.cardStyle {
+        case .filled:
+            return Color(nsColor: .separatorColor).opacity(0.5)
+        case .bordered:
+            // Bordered: use the identity color as the border so cards are visually
+            // distinct even without a filled background.
+            return cardColor.opacity(0.6)
+        case .plain:
+            return .clear
+        }
+    }
+
+    @ViewBuilder
     private var cardBackground: some View {
-        ZStack {
-            // Mostly opaque backing keeps text contrast safe on glass materials.
-            Color(nsColor: .controlBackgroundColor).opacity(0.78)
-            // Whisper of the identity color so cards differ beyond the stripe.
-            LinearGradient(
-                colors: [cardColor.opacity(isHovering ? 0.16 : 0.08), .clear],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            if isHovering {
-                Color.primary.opacity(0.04)
+        switch settings.cardStyle {
+        case .filled:
+            ZStack {
+                // Fully opaque face: solid standard background, readable in all modes.
+                Color(nsColor: .controlBackgroundColor)
+                // Identity tint from the user-controlled strength setting.
+                LinearGradient(
+                    colors: [cardColor.opacity(tintFraction * (isHovering ? 2 : 1)), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                if isHovering {
+                    Color.primary.opacity(0.04)
+                }
             }
+        case .bordered:
+            ZStack {
+                Color.clear
+                if isHovering {
+                    Color.primary.opacity(0.04)
+                }
+            }
+        case .plain:
+            Color.clear
+                .overlay(isHovering ? Color.primary.opacity(0.06) : Color.clear)
         }
     }
 }

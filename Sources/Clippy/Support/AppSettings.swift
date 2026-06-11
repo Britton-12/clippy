@@ -44,6 +44,14 @@ final class AppSettings: ObservableObject {
         static let showSectionHeaders = "showSectionHeaders"
         static let captureImages = "captureImages"
         static let maxImageSizeMB = "maxImageSizeMB"
+        static let captureSoundEnabled = "captureSoundEnabled"
+        static let captureSoundName = "captureSoundName"
+        static let captureSoundVolume = "captureSoundVolume"
+        static let cardStyle = "cardStyle"
+        static let cardTintStrength = "cardTintStrength"
+        static let highContrastCardText = "highContrastCardText"
+        static let fontFamily = "fontFamily"
+        static let fontSizeBase = "fontSizeBase"
     }
 
     private let defaults: UserDefaults
@@ -99,6 +107,43 @@ final class AppSettings: ObservableObject {
     @Published var maxImageSizeMB: Int {
         didSet { defaults.set(maxImageSizeMB, forKey: Keys.maxImageSizeMB) }
     }
+    /// Whether to play a sound after each successful clip save. Defaults to
+    /// false so existing users hear no change until they opt in.
+    @Published var captureSoundEnabled: Bool {
+        didSet { defaults.set(captureSoundEnabled, forKey: Keys.captureSoundEnabled) }
+    }
+    @Published var captureSoundName: CaptureSound {
+        didSet { defaults.set(captureSoundName.rawValue, forKey: Keys.captureSoundName) }
+    }
+    /// Volume in 0-100 integer percent, matching the slider range.
+    @Published var captureSoundVolume: Int {
+        didSet { defaults.set(captureSoundVolume, forKey: Keys.captureSoundVolume) }
+    }
+
+    // MARK: - New appearance knobs
+
+    /// Card rendering style: filled (opaque face), bordered (outline only), or plain.
+    @Published var cardStyle: CardStyle {
+        didSet { defaults.set(cardStyle.rawValue, forKey: Keys.cardStyle) }
+    }
+    /// Identity-color tint strength on cards, 0-20 percent. 0 = no tint.
+    @Published var cardTintStrength: Int {
+        didSet { defaults.set(cardTintStrength, forKey: Keys.cardTintStrength) }
+    }
+    /// When true, card title and preview text use .primary instead of .secondary /
+    /// subdued colors, improving contrast on both light and dark backgrounds.
+    @Published var highContrastCardText: Bool {
+        didSet { defaults.set(highContrastCardText, forKey: Keys.highContrastCardText) }
+    }
+    /// Panel UI font family. .systemDefault uses the system font.
+    @Published var fontFamily: PanelFontFamily {
+        didSet { defaults.set(fontFamily.rawValue, forKey: Keys.fontFamily) }
+    }
+    /// Base font size in points (11-16). The typography helper scales all roles
+    /// from this value so the relative hierarchy is always preserved.
+    @Published var fontSizeBase: Int {
+        didSet { defaults.set(fontSizeBase, forKey: Keys.fontSizeBase) }
+    }
 
     var accentColor: Color { accentTheme.color }
 
@@ -136,12 +181,21 @@ final class AppSettings: ObservableObject {
             Keys.ignoredBundleIDs: [String](),
             Keys.appearanceMode: AppearanceMode.system.rawValue,
             Keys.accentTheme: AccentTheme.system.rawValue,
-            Keys.panelMaterial: PanelMaterialStyle.regular.rawValue,
+            // Solid is the default: fully opaque, full-contrast, no glass effect.
+            Keys.panelMaterial: PanelMaterialStyle.opaque.rawValue,
             Keys.cardColorMode: CardColorMode.byApp.rawValue,
             Keys.showAppIcons: true,
             Keys.showSectionHeaders: true,
             Keys.captureImages: true,
             Keys.maxImageSizeMB: 20,
+            Keys.captureSoundEnabled: false,
+            Keys.captureSoundName: CaptureSound.tink.rawValue,
+            Keys.captureSoundVolume: 50,
+            Keys.cardStyle: CardStyle.filled.rawValue,
+            Keys.cardTintStrength: 8,
+            Keys.highContrastCardText: false,
+            Keys.fontFamily: PanelFontFamily.systemDefault.rawValue,
+            Keys.fontSizeBase: 13,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
         panelWidth = defaults.double(forKey: Keys.panelWidth)
@@ -160,5 +214,17 @@ final class AppSettings: ObservableObject {
         showSectionHeaders = defaults.bool(forKey: Keys.showSectionHeaders)
         captureImages = defaults.bool(forKey: Keys.captureImages)
         maxImageSizeMB = defaults.integer(forKey: Keys.maxImageSizeMB)
+        captureSoundEnabled = defaults.bool(forKey: Keys.captureSoundEnabled)
+        captureSoundName = CaptureSound(rawValue: defaults.string(forKey: Keys.captureSoundName) ?? "") ?? .tink
+        captureSoundVolume = defaults.integer(forKey: Keys.captureSoundVolume)
+        cardStyle = CardStyle(rawValue: defaults.string(forKey: Keys.cardStyle) ?? "") ?? .filled
+        cardTintStrength = defaults.integer(forKey: Keys.cardTintStrength)
+        highContrastCardText = defaults.bool(forKey: Keys.highContrastCardText)
+        fontFamily = PanelFontFamily(rawValue: defaults.string(forKey: Keys.fontFamily) ?? "") ?? .systemDefault
+        fontSizeBase = {
+            let stored = defaults.integer(forKey: Keys.fontSizeBase)
+            // Clamp to valid range; 0 means the key was never written (integer returns 0).
+            return stored >= 11 && stored <= 16 ? stored : 13
+        }()
     }
 }

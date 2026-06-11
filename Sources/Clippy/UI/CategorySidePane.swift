@@ -151,12 +151,12 @@ struct CategorySidePane: View {
                     .foregroundStyle(tint)
                     .frame(width: 18)
                 Text(title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(PanelTypography.metadata(settings).weight(isSelected ? .semibold : .regular))
                     .lineLimit(1)
                 Spacer(minLength: 2)
                 if let count {
                     Text("\(count)")
-                        .font(.caption2)
+                        .font(PanelTypography.micro(settings))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }

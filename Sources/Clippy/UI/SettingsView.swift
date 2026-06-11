@@ -100,8 +100,14 @@ private struct GeneralSettingsTab: View {
 private struct AppearanceSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
 
+    /// Only font families that are installed on this machine.
+    private var availableFamilies: [PanelFontFamily] {
+        PanelFontFamily.allCases.filter { $0.isAvailable }
+    }
+
     var body: some View {
         Form {
+            // MARK: Theme
             Section("Theme") {
                 Picker("Appearance", selection: $settings.appearanceMode) {
                     ForEach(AppearanceMode.allCases) { mode in
@@ -118,27 +124,84 @@ private struct AppearanceSettingsTab: View {
                         }
                     }
                 }
+            }
 
+            // MARK: Background
+            Section("Background") {
                 Picker("Panel background", selection: $settings.panelMaterial) {
                     ForEach(PanelMaterialStyle.allCases) { style in
                         Text(style.label).tag(style)
                     }
                 }
+                Text("\"Solid\" uses the standard window color with full contrast. Glass options apply a blur effect behind the panel.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
+            // MARK: Cards
             Section("Cards") {
+                Picker("Card style", selection: $settings.cardStyle) {
+                    ForEach(CardStyle.allCases) { style in
+                        Text(style.label).tag(style)
+                    }
+                }
+
                 Picker("Card color", selection: $settings.cardColorMode) {
                     ForEach(CardColorMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
-                Text("\"By source app\" tints each card with the app icon's dominant color, like Paste.")
+                Text("\"By source app\" tints each card with the app icon's dominant color.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // Tint strength slider only makes a visible difference for Filled and Bordered.
+                if settings.cardStyle != .plain {
+                    LabeledContent("Color tint: \(settings.cardTintStrength)%") {
+                        Slider(
+                            value: Binding(
+                                get: { Double(settings.cardTintStrength) },
+                                set: { settings.cardTintStrength = Int($0) }
+                            ),
+                            in: 0...20,
+                            step: 1
+                        )
+                    }
+                }
+
+                Toggle("High-contrast card text", isOn: $settings.highContrastCardText)
+                Text("Uses primary label color on both title and preview text instead of subdued gray.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("Show app icons on cards", isOn: $settings.showAppIcons)
                 Toggle("Group clips under date headers", isOn: $settings.showSectionHeaders)
             }
 
+            // MARK: Typography
+            Section("Typography") {
+                Picker("Font", selection: $settings.fontFamily) {
+                    ForEach(availableFamilies) { family in
+                        Text(family.label).tag(family)
+                    }
+                }
+
+                LabeledContent("Size: \(settings.fontSizeBase) pt") {
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.fontSizeBase) },
+                            set: { settings.fontSizeBase = Int($0) }
+                        ),
+                        in: 11...16,
+                        step: 1
+                    )
+                }
+                Text("Applies to clip titles, preview text, and sidebar labels. The settings window uses the system font.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // MARK: Panel size and position
             Section("Panel size and position") {
                 Picker("Open at", selection: $settings.positionMode) {
                     ForEach(PanelPositionMode.allCases) { mode in
@@ -186,6 +249,7 @@ private struct AppearanceSettingsTab: View {
 private struct CaptureSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var ignoredAppsText = AppSettings.shared.ignoredBundleIDs.joined(separator: "\n")
+    @State private var soundVolumeSlider: Double = Double(AppSettings.shared.captureSoundVolume)
 
     var body: some View {
         Form {
@@ -208,6 +272,56 @@ private struct CaptureSettingsTab: View {
                 Text("Bigger copies are ignored to keep the history database lean.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Sounds") {
+                Toggle("Play sound on capture", isOn: $settings.captureSoundEnabled)
+
+                LabeledContent("Sound") {
+                    HStack(spacing: 8) {
+                        Picker("Sound", selection: $settings.captureSoundName) {
+                            ForEach(CaptureSound.allCases) { sound in
+                                Text(sound.label).tag(sound)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 130)
+
+                        // Preview button: plays the selected sound at the
+                        // current volume so the user can audition without saving.
+                        Button {
+                            SoundPlayer.play(
+                                settings.captureSoundName,
+                                volume: SoundPlayer.sliderToVolume(settings.captureSoundVolume)
+                            )
+                        } label: {
+                            Image(systemName: "play.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Preview selected sound")
+                    }
+                }
+                .disabled(!settings.captureSoundEnabled)
+
+                LabeledContent("Volume: \(settings.captureSoundVolume)%") {
+                    Slider(
+                        value: $soundVolumeSlider,
+                        in: 0...100,
+                        step: 1,
+                        onEditingChanged: { editing in
+                            // Commit on release; preview so the user can hear
+                            // the level change immediately.
+                            if !editing {
+                                settings.captureSoundVolume = Int(soundVolumeSlider)
+                                SoundPlayer.play(
+                                    settings.captureSoundName,
+                                    volume: SoundPlayer.sliderToVolume(settings.captureSoundVolume)
+                                )
+                            }
+                        }
+                    )
+                }
+                .disabled(!settings.captureSoundEnabled)
             }
 
             Section("Ignored apps") {

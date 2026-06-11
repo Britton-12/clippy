@@ -111,6 +111,9 @@ final class ClipboardMonitor {
         )
         do {
             try database.saveCapturedClip(&clip)
+            // Sound fires only after a confirmed save; duplicates or DB errors
+            // get no feedback. NSSound.play() is async and never blocks here.
+            playCaptureSound()
         } catch {
             NSLog("Clippy: failed to save clip: \(error)")
         }
@@ -145,9 +148,18 @@ final class ClipboardMonitor {
                 byteSize: stored.byteSize
             )
             try database.saveCapturedImageClip(&clip)
+            playCaptureSound()
         } catch {
             NSLog("Clippy: failed to save image clip: \(error)")
         }
+    }
+
+    // MARK: - Sound feedback
+
+    private func playCaptureSound() {
+        let s = AppSettings.shared
+        guard s.captureSoundEnabled else { return }
+        SoundPlayer.play(s.captureSoundName, volume: SoundPlayer.sliderToVolume(s.captureSoundVolume))
     }
 
     private static func pngData(from pasteboard: NSPasteboard) -> Data? {

@@ -1,8 +1,11 @@
 import AppKit
 import SwiftUI
 
-// The theming vocabulary: appearance, accent, surface material, and how
-// cards get their color. All stored in AppSettings; views read these enums.
+// The theming vocabulary: appearance, accent, surface material, card style,
+// typography, and how cards get their color. All stored in AppSettings; views
+// read these enums directly.
+
+// MARK: - Appearance mode
 
 enum AppearanceMode: String, CaseIterable, Identifiable {
     case system
@@ -28,6 +31,8 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// MARK: - Accent color
 
 enum AccentTheme: String, CaseIterable, Identifiable {
     case system
@@ -74,6 +79,8 @@ enum AccentTheme: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Panel background
+
 enum PanelMaterialStyle: String, CaseIterable, Identifiable {
     case ultraThin
     case thin
@@ -93,7 +100,7 @@ enum PanelMaterialStyle: String, CaseIterable, Identifiable {
         }
     }
 
-    /// nil means use a solid window background instead of a material.
+    /// nil means use the solid window background color instead of a blur material.
     var material: Material? {
         switch self {
         case .ultraThin: return .ultraThinMaterial
@@ -104,6 +111,30 @@ enum PanelMaterialStyle: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// MARK: - Card style
+
+/// Controls how card backgrounds are rendered.
+enum CardStyle: String, CaseIterable, Identifiable {
+    /// Fully opaque card face using the standard control background color.
+    case filled
+    /// Transparent card face with a visible border only.
+    case bordered
+    /// No card chrome at all; items float directly on the panel background.
+    case plain
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .filled: return "Filled"
+        case .bordered: return "Bordered"
+        case .plain: return "Plain"
+        }
+    }
+}
+
+// MARK: - Card color mode
 
 enum CardColorMode: String, CaseIterable, Identifiable {
     case byApp
@@ -122,6 +153,105 @@ enum CardColorMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// MARK: - Font family
+
+/// Panel UI font family choices. The system font is always available. Named
+/// families are verified against NSFontManager at init time; any that are not
+/// installed fall back to the system font so no configuration is ever invalid.
+enum PanelFontFamily: String, CaseIterable, Identifiable {
+    case systemDefault
+    case helveticaNeue = "Helvetica Neue"
+    case sfMono = "SF Mono"
+    case georgia = "Georgia"
+    case menlo = "Menlo"
+    case avenir = "Avenir"
+    case optima = "Optima"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .systemDefault: return "System default"
+        case .helveticaNeue: return "Helvetica Neue"
+        case .sfMono: return "SF Mono"
+        case .georgia: return "Georgia"
+        case .menlo: return "Menlo"
+        case .avenir: return "Avenir"
+        case .optima: return "Optima"
+        }
+    }
+
+    /// The PostScript/family name passed to Font.custom, or nil for .systemDefault.
+    var familyName: String? {
+        switch self {
+        case .systemDefault: return nil
+        default: return rawValue
+        }
+    }
+
+    /// True if the named family is present in the running system. Always true
+    /// for .systemDefault. Call this before showing a family in the picker so
+    /// the list only contains fonts the system actually has.
+    var isAvailable: Bool {
+        guard let name = familyName else { return true }
+        return NSFontManager.shared.availableFontFamilies.contains(name)
+    }
+}
+
+// MARK: - Typography helper
+
+/// Central typography resolver. All panel UI text routes through one of these
+/// computed Font values so the user's font family and base size apply everywhere.
+///
+/// Usage:
+///   Text(foo).font(PanelTypography.body(settings))
+///
+/// Roles and their size offset relative to the base size:
+///   body     +0  (clip preview text, normal labels)
+///   title    +0, weight .medium (clip title / header label)
+///   metadata -1  (date stamps, kind badges, section headers)
+///   micro    -2  (count badges, caption2 equivalents)
+struct PanelTypography {
+    // Prevent instantiation; all members are static helpers.
+    private init() {}
+
+    /// The clip preview text and general body copy.
+    static func body(_ settings: AppSettings) -> Font {
+        make(size: CGFloat(settings.fontSizeBase), weight: .regular, settings: settings)
+    }
+
+    /// The clip title / card header row label.
+    static func title(_ settings: AppSettings) -> Font {
+        make(size: CGFloat(settings.fontSizeBase), weight: .medium, settings: settings)
+    }
+
+    /// Dates, kind badges, section header labels.
+    static func metadata(_ settings: AppSettings) -> Font {
+        make(size: CGFloat(settings.fontSizeBase) - 1, weight: .regular, settings: settings)
+    }
+
+    /// Count badges, caption2-equivalent fine print.
+    static func micro(_ settings: AppSettings) -> Font {
+        make(size: max(9, CGFloat(settings.fontSizeBase) - 2), weight: .regular, settings: settings)
+    }
+
+    // MARK: - Private
+
+    private static func make(size: CGFloat, weight: Font.Weight, settings: AppSettings) -> Font {
+        guard let family = settings.fontFamily.familyName,
+              settings.fontFamily.isAvailable
+        else {
+            // System font path: use Font.system so Dynamic Type and weight work normally.
+            return .system(size: size, weight: weight)
+        }
+        // Custom family: Font.custom with a fixed size. Weight is applied as a modifier
+        // because Font.custom does not accept a weight parameter directly.
+        return .custom(family, size: size).weight(weight)
+    }
+}
+
+// MARK: - Category palette
 
 /// Fixed hexes for category colors. Stored in the DB as text, so they must
 /// be stable values rather than dynamic system colors.

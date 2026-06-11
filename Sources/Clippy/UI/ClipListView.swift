@@ -17,6 +17,8 @@ struct ClipListView: View {
     @State private var selection: PanelSelection = .history
     @State private var selectedIndex = 0
     @State private var categoryCreationClip: Clip?
+    /// The ID of the clip whose title is currently being edited inline.
+    @State private var renamingClipID: Int64?
     @FocusState private var searchFocused: Bool
 
     /// Clips shown for the current selection, in keyboard-navigation order.
@@ -109,7 +111,7 @@ struct ClipListView: View {
                 .foregroundStyle(.secondary)
             TextField("Search clipboard history", text: $store.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(PanelTypography.body(settings))
                 .focused($searchFocused)
                 .onKeyPress(.downArrow) { moveSelection(by: 1); return .handled }
                 .onKeyPress(.upArrow) { moveSelection(by: -1); return .handled }
@@ -230,7 +232,7 @@ struct ClipListView: View {
     private func sectionHeader(_ title: String) -> some View {
         HStack(spacing: 8) {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(PanelTypography.micro(settings).weight(.semibold))
                 .foregroundStyle(.secondary)
                 .kerning(0.6)
             Rectangle()
@@ -252,11 +254,17 @@ struct ClipListView: View {
                     return store.categoryIDs(for: clip).contains(id)
                 }
                 .map { Color(hexString: $0.colorHex) },
+            pinnedCategory: store.firstCategory(for: clip),
+            isRenaming: Binding(
+                get: { renamingClipID == clip.id },
+                set: { active in renamingClipID = active ? clip.id : nil }
+            ),
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onEdit: { onEdit(clip) },
             onTogglePin: { store.togglePin(clip) },
-            onDelete: { store.delete(clip) }
+            onDelete: { store.delete(clip) },
+            onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
         .onTapGesture { onPaste(clip, settings.pastePlainTextByDefault) }
@@ -268,6 +276,8 @@ struct ClipListView: View {
                 Divider()
                 Button("Edit...") { onEdit(clip) }
             }
+            // "Rename..." works for all clip kinds, not just text.
+            Button("Rename...") { renamingClipID = clip.id }
             Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
             categoriesMenu(for: clip)
             Divider()
@@ -318,7 +328,7 @@ struct ClipListView: View {
                 .font(.system(size: 30, weight: .light))
                 .foregroundStyle(.tertiary)
             Text(emptyMessage)
-                .font(.callout)
+                .font(PanelTypography.body(settings))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -360,12 +370,12 @@ struct ClipListView: View {
     private func keyHint(_ key: String, _ action: String) -> some View {
         HStack(spacing: 5) {
             Text(key)
-                .font(.system(size: 12, weight: .semibold))
+                .font(PanelTypography.metadata(settings).weight(.semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
             Text(action)
-                .font(.system(size: 12))
+                .font(PanelTypography.metadata(settings))
                 .foregroundStyle(.primary.opacity(0.75))
         }
         .accessibilityElement(children: .combine)
