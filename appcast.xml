@@ -3,15 +3,15 @@
     <channel>
         <title>Clippy</title>
         <item>
-            <title>Version 0.9.0</title>
-            <pubDate>Thu, 11 Jun 2026 03:40:23 +0000</pubDate>
-            <sparkle:version>0.9.0</sparkle:version>
-            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+            <title>Version 0.9.2</title>
+            <pubDate>Thu, 11 Jun 2026 04:42:19 +0000</pubDate>
+            <sparkle:version>0.9.2</sparkle:version>
+            <sparkle:shortVersionString>0.9.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <link>https://github.com/w159/clippy/releases/tag/v0.9.0</link>
+            <link>https://github.com/w159/clippy/releases/tag/v0.9.2</link>
             <enclosure
-                url="https://github.com/w159/clippy/releases/download/v0.9.0/Clippy-0.9.0.zip"
-                sparkle:edSignature="l1JNFZzdxXGGiFjT0U7xkz/3cpaevzPEL8KqcfZiWcpL/yUL+wY6bBFtvTftVXgZJel3bQi6VcMGF4k1EzyhAw==" length="4805976"
+                url="https://github.com/w159/clippy/releases/download/v0.9.2/Clippy-0.9.2.zip"
+                sparkle:edSignature="OXXoUe2FeiT4xfXh/jtg/xMRqpjWoiKY/E9hstAnp/bMhsqRAnlp4f+o7UG7Ac9xe7m3XE80lR9fO3lCdCSLDA==" length="4805960"
                 type="application/octet-stream" />
         </item>
     </channel>
