@@ -82,12 +82,25 @@ jobs:
             - name: Preflight checks
               env:
                   SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+                  MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+                  MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+                  ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+                  ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+                  ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
               run: |
                   FAIL=0
-                  if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
-                      echo "::error::SPARKLE_ED_PRIVATE_KEY secret is not set - Sparkle signing will fail" >&2
-                      FAIL=1
-                  fi
+                  check_secret() {
+                      if [ -z "${!1}" ]; then
+                          echo "::error::$1 secret is not set" >&2
+                          FAIL=1
+                      fi
+                  }
+                  check_secret SPARKLE_ED_PRIVATE_KEY
+                  check_secret MACOS_CERT_P12_BASE64
+                  check_secret MACOS_CERT_PASSWORD
+                  check_secret ASC_KEY_P8
+                  check_secret ASC_KEY_ID
+                  check_secret ASC_ISSUER_ID
                   if [ ! -f "assets/AppIcon.icns" ]; then
                       echo "::error::assets/AppIcon.icns not found in checkout - build will fail" >&2
                       FAIL=1
@@ -100,8 +113,115 @@ jobs:
             - name: Build app bundle
               run: REQUIRE_SPARKLE=1 scripts/make-app.sh "$VERSION"
 
-            - name: Zip app
-              run: ditto -c -k --keepParent "build/Clippy.app" "build/Clippy-$VERSION.zip"
+            # ---------------------------------------------------------------
+            # Developer ID signing with hardened runtime.
+            #
+            # A throwaway keychain is used so the CI runner's login keychain
+            # is never touched and the certificate is removed on cleanup.
+            # The identity name is resolved dynamically from the imported cert
+            # so we never hardcode a team ID or CN in the workflow.
+            #
+            # Signing order: innermost components first per Apple's nested code
+            # signing requirements. make-app.sh handles the ordering when
+            # CODESIGN_IDENTITY is set.
+            # ---------------------------------------------------------------
+            - name: Import Developer ID certificate and sign app
+              env:
+                  MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+                  MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+              run: |
+                  # Write the .p12 to a temp file.
+                  P12_PATH="$RUNNER_TEMP/devid.p12"
+                  printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$P12_PATH"
+
+                  # Create a throwaway keychain with a random password.
+                  KC_PATH="$RUNNER_TEMP/ci-signing.keychain-db"
+                  KC_PASS="$(openssl rand -hex 16)"
+                  security create-keychain -p "$KC_PASS" "$KC_PATH"
+                  security set-keychain-settings -lut 21600 "$KC_PATH"
+                  security unlock-keychain -p "$KC_PASS" "$KC_PATH"
+
+                  # Import the certificate into the throwaway keychain.
+                  security import "$P12_PATH" -k "$KC_PATH" -P "$MACOS_CERT_PASSWORD" \
+                      -T /usr/bin/codesign -T /usr/bin/security
+                  rm -f "$P12_PATH"
+
+                  # Allow codesign to use the key without an interactive prompt.
+                  security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KC_PATH"
+
+                  # Add to the search list so codesign can find it by identity name.
+                  security list-keychains -d user -s "$KC_PATH" $(security list-keychains -d user | tr -d '"')
+
+                  # Resolve the identity name from what was just imported.
+                  # "Developer ID Application" certs have that substring in the CN.
+                  IDENTITY=$(security find-identity -v -p codesigning "$KC_PATH" \
+                      | grep "Developer ID Application" \
+                      | head -1 \
+                      | sed 's/.*"\(.*\)"/\1/')
+                  if [ -z "$IDENTITY" ]; then
+                      echo "::error::Could not find a Developer ID Application identity in the imported certificate" >&2
+                      exit 1
+                  fi
+                  echo "Using signing identity: $IDENTITY"
+                  echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+                  echo "CI_KC_PATH=$KC_PATH" >> "$GITHUB_ENV"
+                  echo "CI_KC_PASS=$KC_PASS" >> "$GITHUB_ENV"
+
+                  # Sign the already-assembled bundle. make-app.sh skips rebuilding
+                  # swift sources when invoked a second time (the binary exists);
+                  # CODESIGN_IDENTITY triggers the full nested Developer ID signing path.
+                  CODESIGN_IDENTITY="$IDENTITY" REQUIRE_SPARKLE=1 scripts/make-app.sh "$VERSION"
+
+            # Always clean up the throwaway keychain, even if a prior step failed.
+            - name: Remove throwaway keychain
+              if: always()
+              run: |
+                  if [ -n "${CI_KC_PATH:-}" ]; then
+                      security delete-keychain "$CI_KC_PATH" || true
+                  fi
+
+            # ---------------------------------------------------------------
+            # Notarization: zip -> submit -> wait -> staple -> re-zip.
+            #
+            # The EdDSA signature and appcast length/checksum MUST be computed
+            # on the final re-zipped artifact (after stapling). Stapling embeds
+            # the notarization ticket in the .app, which changes its bytes and
+            # therefore changes the zip. Computing EdDSA on the pre-staple zip
+            # would produce a signature that does not match the published file.
+            # ---------------------------------------------------------------
+            - name: Zip signed app for notarization submission
+              run: ditto -c -k --keepParent "build/Clippy.app" "build/Clippy-$VERSION-unsigned.zip"
+
+            - name: Notarize app
+              env:
+                  ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+                  ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+                  ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+              run: |
+                  # Write the .p8 to a temp file; notarytool requires a file path.
+                  ASC_KEY_PATH="$RUNNER_TEMP/asc-key.p8"
+                  printf '%s' "$ASC_KEY_P8" > "$ASC_KEY_PATH"
+
+                  xcrun notarytool submit "build/Clippy-$VERSION-unsigned.zip" \
+                      --key "$ASC_KEY_PATH" \
+                      --key-id "$ASC_KEY_ID" \
+                      --issuer "$ASC_ISSUER_ID" \
+                      --wait \
+                      --timeout 30m
+
+                  rm -f "$ASC_KEY_PATH"
+
+            - name: Staple notarization ticket to app
+              run: |
+                  xcrun stapler staple "build/Clippy.app"
+                  # Confirm Gatekeeper accepts the stapled app before publishing.
+                  spctl --assess --type execute --verbose "build/Clippy.app"
+                  xcrun stapler validate "build/Clippy.app"
+
+            - name: Zip stapled app (final release artifact)
+              run: |
+                  rm -f "build/Clippy-$VERSION-unsigned.zip"
+                  ditto -c -k --keepParent "build/Clippy.app" "build/Clippy-$VERSION.zip"
 
             - name: Download Sparkle tools
               run: |
@@ -110,6 +230,7 @@ jobs:
                   mkdir -p /tmp/sparkle-dist
                   tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle-dist
 
+            # EdDSA signature is computed on the final (stapled) zip.
             - name: Sign update zip
               env:
                   SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
@@ -146,7 +267,7 @@ jobs:
                       gh release create "$TAG" "$ASSET" \
                         --title "Clippy v$VERSION" \
                         --generate-notes \
-                        --notes "First install: unzip, drag Clippy.app to Applications, then right-click > Open once (the app is not notarized). Existing installs update in-app automatically."
+                        --notes "Drag Clippy.app to Applications. This release is Developer ID signed and notarized - Gatekeeper opens it cleanly. Existing installs update in-app automatically."
                   fi
 
                   # Verify the asset is actually attached before we move on.

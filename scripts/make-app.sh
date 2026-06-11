@@ -6,6 +6,24 @@
 # Usage: make-app.sh [version]
 #   version defaults to $VERSION or 0.0.0-dev. CI passes the git tag value.
 #   REQUIRE_SPARKLE=1 makes a missing Sparkle public key a hard error (CI).
+#
+# Signing modes:
+#   CODESIGN_IDENTITY unset (default) - ad-hoc signature for local dev builds;
+#     codesign --sign - produces the "-" (ad-hoc) identity.
+#   CODESIGN_IDENTITY set - Developer ID signing with hardened runtime and a
+#     secure timestamp; used by CI after keychain import. The value must be the
+#     full identity string, e.g.:
+#       "Developer ID Application: Your Name (TEAMID)"
+#     or the 40-character SHA-1 hash of the certificate.
+#
+# When CODESIGN_IDENTITY is set the script signs components inside
+# Sparkle.framework innermost-first (XPC services -> Autoupdate/Updater.app ->
+# framework -> app), as required by Apple:
+#   https://developer.apple.com/library/archive/documentation/Security/
+#   Conceptual/CodeSigningGuide/Procedures/Procedures.html#//apple_ref/doc/
+#   uid/TP40005929-CH4-TNTAG201
+# Sparkle 2.x signing commands follow the official Sparkle docs:
+#   https://sparkle-project.org/documentation/sandboxing/#code-signing
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -89,5 +107,57 @@ ${SPARKLE_KEYS}
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
-echo "Built $APP (version ${VERSION})"
+# -----------------------------------------------------------------------
+# Code signing
+# -----------------------------------------------------------------------
+# CODESIGN_IDENTITY is empty in local dev builds (ad-hoc) and set to the
+# full Developer ID identity string in CI builds (Developer ID signing with
+# hardened runtime + secure timestamp).
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+    # Developer ID / distribution signing.
+    # Sign innermost components first so the outer bundle's resource envelope
+    # covers already-signed nested items. --options runtime enables Hardened
+    # Runtime (required for notarization). --timestamp embeds a secure RFC 3161
+    # timestamp so the signature stays valid after certificate expiry.
+    # Source: Apple Code Signing Guide (nested code section) and
+    # https://sparkle-project.org/documentation/sandboxing/#code-signing
+    SPARKLE_FW="$APP/Contents/Frameworks/Sparkle.framework"
+
+    # 1. XPC services (innermost - Sparkle 2.x, version B)
+    #    Installer: no special entitlements needed.
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        "$SPARKLE_FW/Versions/B/XPCServices/Installer.xpc"
+
+    # 2. Downloader XPC service: preserve its existing entitlements (com.apple.
+    #    security.network.client) rather than stripping them. Sparkle docs for
+    #    >= 2.6 specify --preserve-metadata=entitlements here.
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        --preserve-metadata=entitlements \
+        "$SPARKLE_FW/Versions/B/XPCServices/Downloader.xpc"
+
+    # 3. Autoupdate helper tool
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        "$SPARKLE_FW/Versions/B/Autoupdate"
+
+    # 4. Updater.app (contains its own binary)
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        "$SPARKLE_FW/Versions/B/Updater.app"
+
+    # 5. The framework bundle itself (covers all remaining resources)
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        "$SPARKLE_FW"
+
+    # 6. The app bundle last (outer envelope covers everything above)
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp \
+        "$APP"
+
+    echo "Built $APP (version ${VERSION}, Developer ID signed)"
+else
+    # Ad-hoc signature for local dev builds.
+    # The "-" identity produces a local-only hash-based signature that lets
+    # macOS grant the Accessibility permission persistently across rebuilds.
+    codesign --force --sign - "$APP"
+    echo "Built $APP (version ${VERSION}, ad-hoc signed)"
+fi
