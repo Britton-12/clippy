@@ -58,6 +58,44 @@ extension ClipDatabase {
         _ = try dbQueue.write { db in
             try Category.deleteOne(db, key: id)
         }
+        // Drop the cache if the starter itself was deleted so Cmd+P recreates it.
+        if id == cachedStarterCategoryID { cachedStarterCategoryID = nil }
+    }
+
+    /// Reorder: place `id` immediately before `targetID`, then renumber every
+    /// category's sortOrder sequentially so the order is stable and gap-free.
+    func moveCategory(id: Int64, before targetID: Int64) throws {
+        try dbQueue.write { db in
+            var cats = try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
+            guard let fromIndex = cats.firstIndex(where: { $0.id == id }) else { return }
+            let moving = cats.remove(at: fromIndex)
+            // Recompute the target index after the removal shifts things.
+            let insertIndex = cats.firstIndex(where: { $0.id == targetID }) ?? cats.count
+            cats.insert(moving, at: insertIndex)
+            for (index, category) in cats.enumerated() where category.sortOrder != index {
+                var updated = category
+                updated.sortOrder = index
+                try updated.update(db)
+            }
+        }
+    }
+
+    /// Recreate the starter ("Pinned") category if the user deleted it, so the
+    /// Cmd+P pin shortcut always has a home to toggle.
+    private func ensureStarterCategoryID() throws -> Int64? {
+        if let id = try starterCategoryID() { return id }
+        let created = try dbQueue.write { db -> Int64? in
+            let maxOrder = try Int.fetchOne(db, sql: "SELECT IFNULL(MAX(sortOrder), -1) FROM category") ?? -1
+            var category = Category(
+                id: nil, name: "Pinned", colorHex: "#FF9500",
+                iconKind: .symbol, iconValue: "pin.fill",
+                sortOrder: maxOrder + 1, isStarter: true, createdAt: Date()
+            )
+            try category.insert(db)
+            return category.id
+        }
+        cachedStarterCategoryID = created
+        return created
     }
 
     func setClip(_ clipID: Int64, inCategory categoryID: Int64, _ isMember: Bool) throws {
@@ -78,7 +116,7 @@ extension ClipDatabase {
 
     /// Cmd+P fast path: one keystroke toggles membership in the starter category.
     func toggleStarterMembership(clipID: Int64) throws {
-        guard let starterID = try starterCategoryID() else { return }
+        guard let starterID = try ensureStarterCategoryID() else { return }
         try dbQueue.write { db in
             let isMember = try Bool.fetchOne(
                 db,

@@ -21,6 +21,9 @@ struct ClipListView: View {
     @State private var renamingClipID: Int64?
     @FocusState private var searchFocused: Bool
 
+    /// Active theme token table; every color below reads from this.
+    private var tokens: ThemeTokens { settings.theme }
+
     /// Clips shown for the current selection, in keyboard-navigation order.
     private var visibleClips: [Clip] {
         switch selection {
@@ -47,13 +50,13 @@ struct ClipListView: View {
             Divider()
             footer
         }
-        .background(panelBackground)
+        .background(ThemedPanelBackground(tokens: tokens, opacity: settings.panelOpacity))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+                .strokeBorder(tokens.cardBorder, lineWidth: 1)
         )
-        .tint(settings.accentColor)
+        .tint(tokens.accent)
         .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
         .onChange(of: selection) { _, _ in selectedIndex = 0 }
     }
@@ -61,15 +64,6 @@ struct ClipListView: View {
     /// Side pane takes a quarter of the panel but never less than 150pt.
     private func sidePaneWidth(_ geo: GeometryProxy) -> CGFloat {
         max(150, geo.size.width * 0.25)
-    }
-
-    @ViewBuilder
-    private var panelBackground: some View {
-        if let material = settings.panelMaterial.material {
-            Rectangle().fill(material)
-        } else {
-            Color(nsColor: .windowBackgroundColor)
-        }
     }
 
     // MARK: - Main pane
@@ -85,6 +79,9 @@ struct ClipListView: View {
                     .transition(paneTransition(edge: .trailing))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Background behind the scrolling cards; tracks the transparency slider.
+        .background(tokens.scrollBackground.opacity(settings.panelOpacity))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
         .clipped()
     }
@@ -108,10 +105,11 @@ struct ClipListView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
             TextField("Search clipboard history", text: $store.query)
                 .textFieldStyle(.plain)
                 .font(PanelTypography.body(settings))
+                .foregroundStyle(tokens.textPrimary)
                 .focused($searchFocused)
                 .onKeyPress(.downArrow) { moveSelection(by: 1); return .handled }
                 .onKeyPress(.upArrow) { moveSelection(by: -1); return .handled }
@@ -156,7 +154,7 @@ struct ClipListView: View {
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tokens.textSecondary)
             }
             .buttonStyle(.borderless)
             .help("Clippy settings")
@@ -164,6 +162,7 @@ struct ClipListView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .background(tokens.headerBar.opacity(settings.panelOpacity))
         .onAppear { searchFocused = true }
     }
 
@@ -233,10 +232,10 @@ struct ClipListView: View {
         HStack(spacing: 8) {
             Text(title.uppercased())
                 .font(PanelTypography.micro(settings).weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
                 .kerning(0.6)
             Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.5))
+                .fill(tokens.cardBorder.opacity(0.6))
                 .frame(height: 1)
         }
         .padding(.top, 4)
@@ -329,7 +328,7 @@ struct ClipListView: View {
                 .foregroundStyle(.tertiary)
             Text(emptyMessage)
                 .font(PanelTypography.body(settings))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -365,18 +364,20 @@ struct ClipListView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(tokens.footerBar.opacity(settings.panelOpacity))
     }
 
     private func keyHint(_ key: String, _ action: String) -> some View {
         HStack(spacing: 5) {
             Text(key)
                 .font(PanelTypography.metadata(settings).weight(.semibold))
+                .foregroundStyle(tokens.textPrimary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                .background(tokens.textPrimary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
             Text(action)
                 .font(PanelTypography.metadata(settings))
-                .foregroundStyle(.primary.opacity(0.75))
+                .foregroundStyle(tokens.textPrimary.opacity(0.75))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(key), \(action)")

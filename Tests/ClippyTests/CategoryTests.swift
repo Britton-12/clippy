@@ -64,6 +64,37 @@ final class CategoryTests: XCTestCase {
         XCTAssertEqual(try db.allClips().count, 1)
     }
 
+    func testMoveCategoryReorders() throws {
+        let db = try makeTestDatabase(self)
+        _ = try db.createCategory(named: "A", colorHex: "#111111", iconKind: .symbol, iconValue: "a.circle")
+        let a = try XCTUnwrap(db.categories().first { $0.name == "A" }?.id)
+        _ = try db.createCategory(named: "B", colorHex: "#222222", iconKind: .symbol, iconValue: "b.circle")
+        _ = try db.createCategory(named: "C", colorHex: "#333333", iconKind: .symbol, iconValue: "c.circle")
+        let c = try XCTUnwrap(db.categories().first { $0.name == "C" }?.id)
+
+        // Order starts: Pinned, A, B, C. Move C before A -> Pinned, C, A, B.
+        try db.moveCategory(id: c, before: a)
+        XCTAssertEqual(try db.categories().map(\.name), ["Pinned", "C", "A", "B"])
+    }
+
+    func testDeletingStarterThenPinningRecreatesIt() throws {
+        let db = try makeTestDatabase(self)
+        let starterID = try XCTUnwrap(db.starterCategory()?.id)
+        try db.deleteCategory(id: starterID)
+        XCTAssertNil(try db.starterCategory())
+
+        var clip = makeTextClip("pin me")
+        try db.saveCapturedClip(&clip)
+        let clipID = try XCTUnwrap(db.allClips().first?.id)
+
+        // Cmd+P with no starter present must recreate one and pin into it.
+        try db.toggleStarterMembership(clipID: clipID)
+        let recreated = try XCTUnwrap(db.starterCategory())
+        let recreatedID = try XCTUnwrap(recreated.id)
+        XCTAssertEqual(recreated.name, "Pinned")
+        XCTAssertEqual(try db.membershipMap()[clipID], [recreatedID])
+    }
+
     func testToggleStarterMembership() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("pin me")

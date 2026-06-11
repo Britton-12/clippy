@@ -43,7 +43,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 self?.onOpenSettings?()
             }
         )
-        panel.appearance = settings.appearanceMode.nsAppearance
+        panel.appearance = Theme.nsAppearance(settings)
         panel.contentView = NSHostingView(rootView: root)
 
         // Position synchronously using the last-known or mouse anchor so the

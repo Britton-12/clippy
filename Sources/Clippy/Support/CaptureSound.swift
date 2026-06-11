@@ -34,6 +34,9 @@ enum CaptureSound: String, CaseIterable, Identifiable {
 /// and the system mixes the audio independently of the caller.
 final class SoundPlayer {
 
+    /// Cache of NSSound instances keyed by catalog id (see SoundCatalog).
+    static var idCache: [String: NSSound] = [:]
+
     /// Resolves the named sound and plays it at the given volume (0.0-1.0).
     /// Returns true when playback was started; false when the sound could not
     /// be resolved (e.g. missing from this OS version).

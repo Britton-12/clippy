@@ -4,6 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
+    @ObservedObject private var settings = AppSettings.shared
+
     var body: some View {
         TabView {
             GeneralSettingsTab()
@@ -16,6 +18,23 @@ struct SettingsView: View {
                 .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }
         .frame(width: 540, height: 560)
+        .tint(settings.theme.accent)
+        // Make the settings window track the theme's light/dark appearance and
+        // accent, so the whole app, not just the panel, follows the theme.
+        .background(WindowAppearanceApplier(appearance: Theme.nsAppearance(settings)))
+    }
+}
+
+/// Pushes an NSAppearance onto the hosting window. Used so changing the theme
+/// repaints the settings window (a grouped Form) in matching light/dark.
+private struct WindowAppearanceApplier: NSViewRepresentable {
+    let appearance: NSAppearance?
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        let target = appearance
+        DispatchQueue.main.async { view.window?.appearance = target }
     }
 }
 
@@ -109,12 +128,25 @@ private struct AppearanceSettingsTab: View {
         Form {
             // MARK: Theme
             Section("Theme") {
-                Picker("Appearance", selection: $settings.appearanceMode) {
+                Picker("Theme", selection: $settings.themePreset) {
+                    ForEach(ThemePreset.selectable) { preset in
+                        Text(preset.label).tag(preset)
+                    }
+                }
+                ThemeSwatchStrip(tokens: settings.theme)
+
+                Picker("System appearance", selection: $settings.appearanceMode) {
                     ForEach(AppearanceMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
+                .disabled(settings.themePreset != .system)
+                if settings.themePreset != .system {
+                    Text("Light/dark is set by the chosen theme. Pick \"Match system\" to follow macOS instead.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Accent color")
@@ -123,19 +155,46 @@ private struct AppearanceSettingsTab: View {
                             accentSwatch(theme)
                         }
                     }
+                    Text("Applies on top of any theme. Used for selection, links, and the pin marker.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            // MARK: Background
-            Section("Background") {
-                Picker("Panel background", selection: $settings.panelMaterial) {
-                    ForEach(PanelMaterialStyle.allCases) { style in
-                        Text(style.label).tag(style)
-                    }
+            // MARK: Transparency
+            Section("Transparency") {
+                LabeledContent("Opacity: \(Int(settings.panelOpacity * 100))%") {
+                    Slider(value: $settings.panelOpacity, in: 0.3...1.0, step: 0.05)
                 }
-                Text("\"Solid\" uses the standard window color with full contrast. Glass options apply a blur effect behind the panel.")
+                Text("100% is fully solid. Lower values let the desktop show through a blur behind the panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            // MARK: Custom colors (only when the Custom theme is selected)
+            if settings.themePreset == .custom {
+                Section("Custom colors") {
+                    customColorRow("Text (primary)", $settings.customTextPrimaryHex)
+                    customColorRow("Text (secondary)", $settings.customTextSecondaryHex)
+                    customColorRow("Accent", $settings.customAccentHex)
+                    customColorRow("Card inner surface", $settings.customCardSurfaceHex)
+                    customColorRow("Card border", $settings.customCardBorderHex)
+                    customColorRow("Scroll area background", $settings.customScrollBgHex)
+                    customColorRow("Panel background", $settings.customPanelHex)
+                    customColorRow("Header bar", $settings.customHeaderHex)
+                    customColorRow("Footer bar", $settings.customFooterHex)
+                    customColorRow("Category sidebar", $settings.customSidebarHex)
+                    // Scrollbars and the text caret are drawn by AppKit and only
+                    // come in light/dark, so they follow this toggle rather than
+                    // an arbitrary hex.
+                    Toggle("Dark scrollbars and caret", isOn: $settings.customIsDark)
+                    HStack {
+                        Button("Copy current theme") { settings.seedCustomFromActive() }
+                        Button("Reset to light") { settings.resetCustomColors() }
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+                }
             }
 
             // MARK: Cards
@@ -242,6 +301,50 @@ private struct AppearanceSettingsTab: View {
         .buttonStyle(.plain)
         .help(theme.label)
     }
+
+    /// One editable surface color: a hex field plus the macOS color wheel, both
+    /// bound to the same stored hex string so either updates the other.
+    private func customColorRow(_ title: String, _ hex: Binding<String>) -> some View {
+        let color = Binding<Color>(
+            get: { Color(themeHex: hex.wrappedValue) },
+            set: { hex.wrappedValue = $0.themeHexString }
+        )
+        return LabeledContent(title) {
+            HStack(spacing: 8) {
+                TextField("#RRGGBB", text: hex)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 92)
+                ColorPicker("", selection: color, supportsOpacity: false)
+                    .labelsHidden()
+            }
+        }
+    }
+}
+
+/// Five-swatch preview of the active theme (panel, card, two text tones, accent)
+/// so the user sees a palette change before opening the panel.
+private struct ThemeSwatchStrip: View {
+    let tokens: ThemeTokens
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(swatches.enumerated()), id: \.offset) { _, color in
+                Rectangle().fill(color)
+            }
+        }
+        .frame(height: 20)
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(tokens.cardBorder, lineWidth: 1)
+        )
+        .accessibilityHidden(true)
+    }
+
+    private var swatches: [Color] {
+        [tokens.panel, tokens.cardSurface, tokens.textSecondary, tokens.textPrimary, tokens.accent]
+    }
 }
 
 // MARK: - Capture
@@ -250,6 +353,12 @@ private struct CaptureSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var ignoredAppsText = AppSettings.shared.ignoredBundleIDs.joined(separator: "\n")
     @State private var soundVolumeSlider: Double = Double(AppSettings.shared.captureSoundVolume)
+
+    /// Distinct catalog groups, in first-seen order, for the sectioned picker.
+    private var soundGroups: [String] {
+        var seen = Set<String>()
+        return SoundCatalog.options.compactMap { seen.insert($0.group).inserted ? $0.group : nil }
+    }
 
     var body: some View {
         Form {
@@ -279,19 +388,28 @@ private struct CaptureSettingsTab: View {
 
                 LabeledContent("Sound") {
                     HStack(spacing: 8) {
-                        Picker("Sound", selection: $settings.captureSoundName) {
-                            ForEach(CaptureSound.allCases) { sound in
-                                Text(sound.label).tag(sound)
+                        Picker("Sound", selection: $settings.captureSoundID) {
+                            ForEach(soundGroups, id: \.self) { group in
+                                Section(group) {
+                                    ForEach(SoundCatalog.options.filter { $0.group == group }) { option in
+                                        Text(option.label).tag(option.id)
+                                    }
+                                }
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 130)
+                        .frame(width: 180)
+                        // Audition immediately on selection change, the way the
+                        // macOS Sound preference pane does.
+                        .onChange(of: settings.captureSoundID) { _, id in
+                            SoundPlayer.play(id: id, volume: SoundPlayer.sliderToVolume(settings.captureSoundVolume))
+                        }
 
                         // Preview button: plays the selected sound at the
                         // current volume so the user can audition without saving.
                         Button {
                             SoundPlayer.play(
-                                settings.captureSoundName,
+                                id: settings.captureSoundID,
                                 volume: SoundPlayer.sliderToVolume(settings.captureSoundVolume)
                             )
                         } label: {
@@ -314,7 +432,7 @@ private struct CaptureSettingsTab: View {
                             if !editing {
                                 settings.captureSoundVolume = Int(soundVolumeSlider)
                                 SoundPlayer.play(
-                                    settings.captureSoundName,
+                                    id: settings.captureSoundID,
                                     volume: SoundPlayer.sliderToVolume(settings.captureSoundVolume)
                                 )
                             }

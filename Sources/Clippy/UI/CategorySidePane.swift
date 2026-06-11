@@ -10,12 +10,16 @@ struct CategorySidePane: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var editingCategory: Category?
     @State private var isCreating = false
+    /// Category currently being dragged, so a drop target can compute the move.
+    @State private var draggingCategoryID: Int64?
+
+    private var tokens: ThemeTokens { settings.theme }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             historyRow
             Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.5))
+                .fill(tokens.cardBorder.opacity(0.6))
                 .frame(height: 1)
                 .padding(.vertical, 4)
             ScrollView {
@@ -30,7 +34,7 @@ struct CategorySidePane: View {
         }
         .padding(6)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.primary.opacity(0.03))
+        .background(tokens.sidebar.opacity(settings.panelOpacity))
         .accessibilityLabel("Categories")
     }
 
@@ -66,12 +70,13 @@ struct CategorySidePane: View {
         }
         .contextMenu {
             Button("Edit...") { editingCategory = category }
-            if !category.isStarter {
-                Divider()
-                Button("Delete", role: .destructive) {
-                    if selection == .category(categoryID) { selection = .history }
-                    store.deleteCategory(category)
-                }
+            Divider()
+            // Every category, including the starter "Pinned", can be deleted.
+            // Its clips simply lose that membership (and unpin if it was their
+            // only category).
+            Button("Delete", role: .destructive) {
+                if selection == .category(categoryID) { selection = .history }
+                store.deleteCategory(category)
             }
         }
         .popover(
@@ -89,8 +94,22 @@ struct CategorySidePane: View {
                 store.updateCategory(updated)
             }
         }
+        // Drag a category onto another to reorder; drag a clip card onto a
+        // category to file it there. The payload prefix disambiguates the two.
+        .draggable("cat:\(categoryID)") {
+            categoryIcon(category)
+                .foregroundStyle(tint)
+                .padding(6)
+                .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+        }
         .dropDestination(for: String.self) { items, _ in
-            guard let clipID = items.first.flatMap(Int64.init) else { return false }
+            guard let payload = items.first else { return false }
+            if payload.hasPrefix("cat:") {
+                guard let draggedID = Int64(payload.dropFirst(4)), draggedID != categoryID else { return false }
+                store.moveCategory(id: draggedID, beforeCategoryID: categoryID)
+                return true
+            }
+            guard let clipID = Int64(payload) else { return false }
             store.addClip(id: clipID, toCategory: categoryID)
             return true
         }
@@ -152,12 +171,13 @@ struct CategorySidePane: View {
                     .frame(width: 18)
                 Text(title)
                     .font(PanelTypography.metadata(settings).weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(tokens.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 2)
                 if let count {
                     Text("\(count)")
                         .font(PanelTypography.micro(settings))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(tokens.textSecondary)
                         .monospacedDigit()
                 }
             }

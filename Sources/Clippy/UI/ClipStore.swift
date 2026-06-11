@@ -132,6 +132,11 @@ final class ClipStore: ObservableObject {
         try? database.deleteCategory(id: id)
     }
 
+    /// Move one category so it sits just before another (drag-to-reorder).
+    func moveCategory(id: Int64, beforeCategoryID: Int64) {
+        try? database.moveCategory(id: id, before: beforeCategoryID)
+    }
+
     func delete(_ clip: Clip) {
         guard let id = clip.id else { return }
         try? database.deleteClip(id: id)

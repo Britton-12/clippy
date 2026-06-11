@@ -236,6 +236,18 @@ struct PanelTypography {
         make(size: max(9, CGFloat(settings.fontSizeBase) - 2), weight: .regular, settings: settings)
     }
 
+    /// NSFont matching the title role, for AppKit-backed fields (the rename
+    /// editor) so inline editing keeps the same typography as the label.
+    static func nsTitleFont(_ settings: AppSettings) -> NSFont {
+        let size = CGFloat(settings.fontSizeBase)
+        if let family = settings.fontFamily.familyName,
+           settings.fontFamily.isAvailable,
+           let custom = NSFont(name: family, size: size) {
+            return custom
+        }
+        return NSFont.systemFont(ofSize: size, weight: .medium)
+    }
+
     // MARK: - Private
 
     private static func make(size: CGFloat, weight: Font.Weight, settings: AppSettings) -> Font {

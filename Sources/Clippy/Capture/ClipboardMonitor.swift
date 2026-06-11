@@ -1,6 +1,13 @@
 import AppKit
 import Combine
 
+extension Notification.Name {
+    /// Posted on the main thread immediately after a clip is saved, at the same
+    /// instant the capture sound fires. The status item observes it to bounce
+    /// the mascot in sync with the sound.
+    static let clippyDidCapture = Notification.Name("ClippyDidCapture")
+}
+
 /// Watches NSPasteboard.general by polling changeCount (the only supported
 /// detection mechanism on macOS) and stores new items.
 final class ClipboardMonitor {
@@ -158,8 +165,11 @@ final class ClipboardMonitor {
 
     private func playCaptureSound() {
         let s = AppSettings.shared
+        // Fire the menu bar mascot bounce on the same event so icon and sound
+        // are perfectly in sync, whether or not the sound itself is enabled.
+        NotificationCenter.default.post(name: .clippyDidCapture, object: nil)
         guard s.captureSoundEnabled else { return }
-        SoundPlayer.play(s.captureSoundName, volume: SoundPlayer.sliderToVolume(s.captureSoundVolume))
+        SoundPlayer.play(id: s.captureSoundID, volume: SoundPlayer.sliderToVolume(s.captureSoundVolume))
     }
 
     private static func pngData(from pasteboard: NSPasteboard) -> Data? {

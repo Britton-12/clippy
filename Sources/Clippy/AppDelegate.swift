@@ -88,10 +88,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "clipboard",
-            accessibilityDescription: "Clippy"
-        )
+        statusItem.button?.image = MascotStatusIcon.image()
+        statusItem.button?.wantsLayer = true
+
+        // Bounce the mascot the instant a clip is captured, in sync with the
+        // capture sound (both fire off the same .clippyDidCapture event).
+        NotificationCenter.default.addObserver(
+            forName: .clippyDidCapture,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let button = self?.statusItem.button else { return }
+            MascotStatusIcon.bounce(button)
+        }
 
         let menu = NSMenu()
 
@@ -139,10 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePause() {
         monitor.isPaused.toggle()
         pauseMenuItem.state = monitor.isPaused ? .on : .off
-        statusItem.button?.image = NSImage(
-            systemSymbolName: monitor.isPaused ? "clipboard.fill" : "clipboard",
-            accessibilityDescription: "Clippy"
-        )
+        // Dim the mascot while capture is paused so the state is visible at a
+        // glance without swapping to a different glyph.
+        statusItem.button?.alphaValue = monitor.isPaused ? 0.4 : 1.0
+        statusItem.button?.toolTip = monitor.isPaused ? "Clippy (paused)" : "Clippy"
     }
 
     @objc private func openSettings() {

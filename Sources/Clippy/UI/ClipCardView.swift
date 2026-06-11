@@ -25,11 +25,11 @@ struct ClipCardView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+
+    private var tokens: ThemeTokens { settings.theme }
     /// Whether the title field is in inline-edit mode. Driven by the parent via
     /// isRenamingBinding so context-menu "Rename..." can trigger it externally.
     @Binding var isRenaming: Bool
-    /// Draft text while the user is typing; committed on Return or focus loss.
-    @State private var renameText = ""
 
     /// Convenience init for callers that do not need external rename control.
     init(
@@ -97,7 +97,7 @@ struct ClipCardView: View {
                     Text(clip.previewText)
                         .font(PanelTypography.body(settings))
                         .lineLimit(3)
-                        .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary))
+                        .foregroundStyle(tokens.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if case .colorValue(let swatch) = kind {
@@ -166,7 +166,7 @@ struct ClipCardView: View {
         } else {
             Image(systemName: "app.dashed")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
                 .frame(width: 16, height: 16)
         }
     }
@@ -197,32 +197,52 @@ struct ClipCardView: View {
     private var titleLabel: some View {
         Text(clip.displayTitle)
             .font(PanelTypography.title(settings))
-            .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .foregroundStyle(settings.highContrastCardText ? tokens.textPrimary : tokens.textSecondary)
             .lineLimit(1)
             .onTapGesture(count: 2) { beginRename() }
     }
 
-    /// Inline text field shown while the user is renaming.
+    /// Inline rename field. The background is the standard editable-field color
+    /// (white in light themes, dark in dark themes), which contrasts the card
+    /// face so the field reads unmistakably as a text entry. Focus and full
+    /// selection happen automatically via SelectAllTextField.
     private var titleEditor: some View {
-        TextField("Title", text: $renameText)
-            .font(PanelTypography.title(settings))
-            .foregroundStyle(settings.highContrastCardText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .textFieldStyle(.plain)
-            .onSubmit { commitRename() }
-            // Escape key cancels without saving.
-            .onExitCommand { cancelRename() }
-            .onAppear { renameText = clip.userTitle ?? "" }
+        SelectAllTextField(
+            initialText: clip.userTitle ?? clip.displayTitle,
+            font: PanelTypography.nsTitleFont(settings),
+            textColor: NSColor(tokens.textPrimary),
+            onCommit: { commitRename($0) },
+            onCancel: { cancelRename() }
+        )
+        .frame(height: 18)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        // Opposite-luminance fill so the field never blends into the card:
+        // a dark tint on light themes, a light tint on dark themes.
+        .background(renameFieldFill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(tokens.accent, lineWidth: 1.5)
+        )
+    }
+
+    private var renameFieldFill: Color {
+        tokens.isDark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)
     }
 
     private func beginRename() {
-        renameText = clip.userTitle ?? ""
         isRenaming = true
     }
 
-    private func commitRename() {
+    private func commitRename(_ value: String) {
         isRenaming = false
-        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        onRename(trimmed.isEmpty ? nil : trimmed)
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty, or unchanged-from-the-app-name, clears the custom title.
+        if trimmed.isEmpty || trimmed == clip.sourceAppName {
+            onRename(nil)
+        } else {
+            onRename(trimmed)
+        }
     }
 
     private func cancelRename() {
@@ -242,17 +262,17 @@ struct ClipCardView: View {
             if clip.isRich {
                 Image(systemName: "textformat")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tokens.textSecondary)
                     .help("Has rich formatting")
             }
             if isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(settings.accentColor)
+                    .foregroundStyle(tokens.accent)
             }
             Text(clip.createdAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
                 .font(PanelTypography.metadata(settings))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
                 .monospacedDigit()
         }
     }
@@ -280,7 +300,7 @@ struct ClipCardView: View {
                 .frame(width: 24, height: 20)
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(tokens.textSecondary)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -320,7 +340,7 @@ struct ClipCardView: View {
             if let width = clip.pixelWidth, let height = clip.pixelHeight {
                 Text("\(width)x\(height) PNG")
                     .font(PanelTypography.micro(settings))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tokens.textSecondary)
                     .monospacedDigit()
             }
         }
@@ -333,11 +353,11 @@ struct ClipCardView: View {
                 .frame(width: 38, height: 16)
                 .overlay(
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .strokeBorder(tokens.cardBorder, lineWidth: 1)
                 )
             Text("Color value")
                 .font(PanelTypography.micro(settings))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
         }
     }
 
@@ -347,10 +367,10 @@ struct ClipCardView: View {
     }
 
     private var cardBorderColor: Color {
-        if isSelected { return settings.accentColor }
+        if isSelected { return tokens.accent }
         switch settings.cardStyle {
         case .filled:
-            return Color(nsColor: .separatorColor).opacity(0.5)
+            return tokens.cardBorder
         case .bordered:
             // Bordered: use the identity color as the border so cards are visually
             // distinct even without a filled background.
@@ -365,8 +385,8 @@ struct ClipCardView: View {
         switch settings.cardStyle {
         case .filled:
             ZStack {
-                // Fully opaque face: solid standard background, readable in all modes.
-                Color(nsColor: .controlBackgroundColor)
+                // Opaque themed card face: always readable, never washed out.
+                tokens.cardSurface
                 // Identity tint from the user-controlled strength setting.
                 LinearGradient(
                     colors: [cardColor.opacity(tintFraction * (isHovering ? 2 : 1)), .clear],
@@ -374,19 +394,19 @@ struct ClipCardView: View {
                     endPoint: .trailing
                 )
                 if isHovering {
-                    Color.primary.opacity(0.04)
+                    tokens.textPrimary.opacity(0.05)
                 }
             }
         case .bordered:
             ZStack {
                 Color.clear
                 if isHovering {
-                    Color.primary.opacity(0.04)
+                    tokens.textPrimary.opacity(0.05)
                 }
             }
         case .plain:
             Color.clear
-                .overlay(isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                .overlay(isHovering ? tokens.textPrimary.opacity(0.06) : Color.clear)
         }
     }
 }
