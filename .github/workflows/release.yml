@@ -14,7 +14,7 @@ name: Release
 #   https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow
 on:
     push:
-        tags: ["v0.7.2"]
+        tags: ["v*"]
     workflow_dispatch:
         inputs:
             version:
