@@ -39,9 +39,11 @@ jobs:
               # For a tag push, strip the leading "v" from the ref name.
               # For a manual dispatch, take the input directly.
               # Either way VERSION is available to every subsequent step.
+              env:
+                  INPUT_VERSION: ${{ inputs.version }}
               run: |
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                      echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+                      echo "VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
                   else
                       echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
                   fi
@@ -63,7 +65,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
-                  TAG="v${{ inputs.version }}"
+                  TAG="v$VERSION"
                   if git rev-parse "$TAG" >/dev/null 2>&1; then
                       echo "Tag $TAG already exists locally, skipping creation"
                   elif git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
@@ -225,7 +227,7 @@ jobs:
 
             - name: Download Sparkle tools
               run: |
-                  curl -sSfL -o /tmp/sparkle.tar.xz \
+                  curl -sSfL --proto-redir '=https' -o /tmp/sparkle.tar.xz \
                     "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
                   mkdir -p /tmp/sparkle-dist
                   tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle-dist

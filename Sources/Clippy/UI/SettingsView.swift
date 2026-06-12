@@ -475,9 +475,27 @@ private struct CaptureSettingsTab: View {
 
 private struct IntegrationsSettingsTab: View {
     @State private var exportResult: String?
+    @State private var archiveResult: String?
 
     var body: some View {
         Form {
+            Section("Categories and pins") {
+                LabeledContent("Pinned archive") {
+                    HStack {
+                        Button("Export clippy.toml...") { exportTOML() }
+                        Button("Import clippy.toml...") { importTOML() }
+                    }
+                }
+                if let archiveResult {
+                    Text(archiveResult)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("clippy.toml is a human-readable file of every category (name, color, icon, order) and the clips pinned into it. Edit it in any text editor and re-import to make bulk changes. Importing is non-destructive: it adds and updates, never clears.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Data") {
                 LabeledContent("Export history") {
                     Button("Export as JSON...") { exportJSON() }
@@ -536,6 +554,38 @@ private struct IntegrationsSettingsTab: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    private func exportTOML() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText]
+        panel.nameFieldStringValue = "clippy.toml"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let toml = try ClippyArchive.exportTOML(from: ClipDatabase.shared)
+            try toml.write(to: url, atomically: true, encoding: .utf8)
+            archiveResult = "Exported categories and pinned clips to \(url.lastPathComponent)."
+        } catch {
+            archiveResult = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importTOML() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText, .plainText, .text]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let summary = try ClippyArchive.importTOML(text, into: ClipDatabase.shared)
+            var message = "Imported \(summary.categories) categories and \(summary.clips) clips."
+            if summary.skippedImages > 0 {
+                message += " Skipped \(summary.skippedImages) image(s) whose files were missing."
+            }
+            archiveResult = message
+        } catch {
+            archiveResult = "Import failed: \(error.localizedDescription)"
+        }
     }
 
     private func exportJSON() {

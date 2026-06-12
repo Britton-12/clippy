@@ -25,10 +25,13 @@ struct ClipListView: View {
     private var tokens: ThemeTokens { settings.theme }
 
     /// Clips shown for the current selection, in keyboard-navigation order.
+    /// History is the "loose" root: once a clip is filed into any category it
+    /// behaves like a file moved into a folder and no longer appears here, only
+    /// inside that category's pane.
     private var visibleClips: [Clip] {
         switch selection {
         case .history:
-            return store.clips
+            return store.clips.filter { !store.isPinned($0) }
         case .category(let categoryID):
             return store.clips.filter { store.categoryIDs(for: $0).contains(categoryID) }
         }
