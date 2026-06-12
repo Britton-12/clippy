@@ -16,15 +16,17 @@ struct CategoryEditorView: View {
     @State private var iconKind: CategoryIconKind
     @State private var iconValue: String
     @State private var iconTab: CategoryIconKind
+    /// Substring filter for the Symbols tab. Empty shows the full curated list.
+    @State private var symbolQuery: String = ""
 
-    private static let symbols: [String] = [
-        "pin.fill", "star.fill", "heart.fill", "bolt.fill", "flame.fill", "tag.fill",
-        "folder.fill", "tray.full.fill", "doc.text.fill", "terminal.fill", "curlybraces",
-        "chevron.left.forwardslash.chevron.right", "link", "envelope.fill", "key.fill",
-        "lock.fill", "creditcard.fill", "cart.fill", "gift.fill", "book.fill",
-        "graduationcap.fill", "briefcase.fill", "house.fill", "airplane", "car.fill",
-        "gamecontroller.fill", "music.note", "photo.fill", "paintpalette.fill", "lightbulb.fill",
-    ]
+    /// Symbols matching the current query (case-insensitive substring on the
+    /// symbol name). Selection only ever comes from this curated set, so
+    /// `iconValue` can never hold a free-text / invalid symbol name.
+    private var filteredSymbols: [String] {
+        let query = symbolQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return CategorySymbols.all }
+        return CategorySymbols.all.filter { $0.lowercased().contains(query) }
+    }
 
     private static let emojis: [String] = [
         "\u{1F4CC}", "\u{2B50}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{26A1}", "\u{1F3F7}",
@@ -79,6 +81,11 @@ struct CategoryEditorView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                if iconTab == .symbol {
+                    TextField("Search symbols", text: $symbolQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                }
                 iconGrid
             }
 
@@ -118,12 +125,27 @@ struct CategoryEditorView: View {
 
     @ViewBuilder
     private var iconGrid: some View {
+        // A filtered symbol search can yield zero matches; show an explicit
+        // empty state rather than a blank grid so the user knows the filter
+        // ran and matched nothing.
+        if iconTab == .symbol && filteredSymbols.isEmpty {
+            Text("No symbols match")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 110)
+        } else {
+            symbolEmojiAppGrid
+        }
+    }
+
+    @ViewBuilder
+    private var symbolEmojiAppGrid: some View {
         let columns = [GridItem(.adaptive(minimum: 30), spacing: 4)]
         ScrollView {
             LazyVGrid(columns: columns, spacing: 4) {
                 switch iconTab {
                 case .symbol:
-                    ForEach(Self.symbols, id: \.self) { symbol in
+                    ForEach(filteredSymbols, id: \.self) { symbol in
                         iconCell(isSelected: iconKind == .symbol && iconValue == symbol) {
                             iconKind = .symbol
                             iconValue = symbol

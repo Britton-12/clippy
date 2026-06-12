@@ -5,8 +5,8 @@ import SwiftUI
 /// Run executes it in a subprocess (after a confirmation) and shows the output.
 struct ScriptsView: View {
     @ObservedObject private var store = ScriptStore.shared
+    // Theme tokens drive surfaces/borders/text so a theme switch repaints this view.
     @ObservedObject private var settings = AppSettings.shared
-
     private var tokens: ThemeTokens { settings.theme }
 
     @State private var selection: UUID?
@@ -84,7 +84,12 @@ struct ScriptsView: View {
                 }
 
                 if running {
-                    ProgressView().controlSize(.small)
+                    // No cancel yet (out of scope); label clarifies the script is still running.
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Running...").font(.caption).foregroundStyle(tokens.textSecondary)
+                    }
+                    .help("The script is still running.")
                 }
                 if let result {
                     outputView(result)
@@ -97,10 +102,13 @@ struct ScriptsView: View {
     private func outputView(_ result: ScriptResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                // Green/red are kept here: they carry true success/failure status,
+                // for which the token table has no semantic color.
                 Image(systemName: result.succeeded ? "checkmark.circle.fill" : "xmark.octagon.fill")
                     .foregroundStyle(result.succeeded ? .green : .red)
-                Text(result.timedOut ? "Timed out" : "Exit \(result.exitCode) · \(result.durationMs) ms")
+                Text(result.timedOut ? "Timed out" : "Exit \(result.exitCode) - \(result.durationMs) ms")
                     .font(.caption)
+                    .foregroundStyle(tokens.textPrimary)
                 Spacer()
                 if !result.stdout.isEmpty {
                     Button("Copy output") { copyToPasteboard(result.stdout) }
@@ -109,18 +117,20 @@ struct ScriptsView: View {
             }
             if !result.stdout.isEmpty { outputBox(result.stdout, mono: true) }
             if !result.stderr.isEmpty {
-                Text("stderr").font(.caption2).foregroundStyle(.secondary)
+                Text("stderr").font(.caption2).foregroundStyle(tokens.textSecondary)
                 outputBox(result.stderr, mono: true)
             }
         }
         .padding(8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(tokens.cardBorder))
     }
 
     private func outputBox(_ text: String, mono: Bool) -> some View {
         ScrollView {
             Text(text)
                 .font(mono ? .system(.caption, design: .monospaced) : .caption)
+                .foregroundStyle(tokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }

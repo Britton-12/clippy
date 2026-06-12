@@ -23,6 +23,11 @@ struct ClipListView: View {
     @State private var ocrStatusMessage: String?
     /// ID of the clip currently being processed by OCR so the card can show a spinner.
     @State private var ocrProcessingClipID: Int64?
+    /// The clip awaiting delete confirmation. Every delete path (hover button,
+    /// context menu, Cmd-Delete) routes through this single piece of state so
+    /// there is one confirmation entry point and deletion is never destructive
+    /// without a prompt.
+    @State private var clipPendingDeletion: Clip?
     @FocusState private var searchFocused: Bool
     /// AI runner used by the context-menu AI submenu.
     @StateObject private var aiRunner = AIActionRunner()
@@ -76,7 +81,7 @@ struct ClipListView: View {
         .tint(tokens.accent)
         .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
         .onChange(of: selection) { _, _ in selectedIndex = 0 }
-        // AI action sheet — shown when a context-menu AI action produces a proposal.
+        // AI action sheet, shown when a context-menu AI action produces a proposal.
         .sheet(isPresented: Binding(
             get: { aiRunner.isPresenting },
             set: { if !$0 { aiRunner.reset() } }
@@ -87,6 +92,27 @@ struct ClipListView: View {
                 aiRunner.reset()
             }
         }
+        // Single confirmation gate for every delete path. The button is marked
+        // destructive so it reads red and is not the default action.
+        .alert(
+            "Delete this clip?",
+            isPresented: Binding(
+                get: { clipPendingDeletion != nil },
+                set: { if !$0 { clipPendingDeletion = nil } }
+            ),
+            presenting: clipPendingDeletion
+        ) { clip in
+            Button("Delete", role: .destructive) { store.delete(clip) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This permanently removes the clip from your history.")
+        }
+    }
+
+    /// Stages a clip for deletion behind the confirmation alert. All delete
+    /// entry points call this instead of store.delete directly.
+    private func requestDelete(_ clip: Clip) {
+        clipPendingDeletion = clip
     }
 
     /// Side pane takes a quarter of the panel but never less than 150pt.
@@ -186,7 +212,7 @@ struct ClipListView: View {
                 }
                 .onKeyPress(keys: [.delete]) { press in
                     guard press.modifiers.contains(.command), let clip = selectedClip else { return .ignored }
-                    store.delete(clip)
+                    requestDelete(clip)
                     return .handled
                 }
                 .onKeyPress(keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]) { press in
@@ -315,7 +341,7 @@ struct ClipListView: View {
             onPastePlain: { onPaste(clip, true) },
             onEdit: { onEdit(clip) },
             onTogglePin: { store.togglePin(clip) },
-            onDelete: { store.delete(clip) },
+            onDelete: { requestDelete(clip) },
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
@@ -352,7 +378,7 @@ struct ClipListView: View {
             }
             categoriesMenu(for: clip)
             Divider()
-            Button("Delete", role: .destructive) { store.delete(clip) }
+            Button("Delete", role: .destructive) { requestDelete(clip) }
         }
         .popover(
             isPresented: Binding(

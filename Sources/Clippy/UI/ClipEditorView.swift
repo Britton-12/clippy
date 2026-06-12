@@ -31,6 +31,8 @@ private struct TextClipEditor: View {
     @State private var text: String
     @State private var title: String
 
+    private var tokens: ThemeTokens { settings.theme }
+
     init(clip: Clip, store: ClipStore, onClose: @escaping () -> Void) {
         self.clip = clip
         self.store = store
@@ -51,11 +53,15 @@ private struct TextClipEditor: View {
             .padding(10)
             Divider()
             PlainTextEditor(text: $text)
+                // Editor content honors the user's panel typography and text color
+                // so it reads the same as the card the editor opened from.
+                .font(PanelTypography.body(settings))
+                .foregroundStyle(tokens.textPrimary)
             Divider()
             HStack {
-                Text("\(text.unicodeScalars.count) Unicode scalars · \(wordCount) words · \(lineCount) lines")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(statsSummary)
+                    .font(PanelTypography.metadata(settings))
+                    .foregroundStyle(tokens.textSecondary)
                     .accessibilityLabel("\(text.unicodeScalars.count) Unicode scalars, \(wordCount) words, \(lineCount) lines")
                 Spacer()
                 Button("Cancel", role: .cancel) { onClose() }
@@ -66,6 +72,7 @@ private struct TextClipEditor: View {
             .padding(12)
         }
         .frame(minWidth: 480, minHeight: 360)
+        .background(tokens.cardSurface)
         .sheet(isPresented: aiSheetBinding) {
             AIActionSheet(runner: ai) { proposal in apply(proposal) }
         }
@@ -88,7 +95,9 @@ private struct TextClipEditor: View {
         } label: {
             Label("AI", systemImage: "sparkles")
         }
-        .menuStyle(.borderlessButton)
+        // Native bordered pull-down so the menu reads as a control in a titled
+        // editor rather than a borderless web-style affordance.
+        .menuStyle(.button)
         .fixedSize()
     }
 
@@ -121,11 +130,22 @@ private struct TextClipEditor: View {
         onClose()
     }
 
+    private var statsSummary: String {
+        "\(pluralize(text.unicodeScalars.count, "Unicode scalar"))  |  \(pluralize(wordCount, "word"))  |  \(pluralize(lineCount, "line"))"
+    }
+
+    /// Counts runs of non-whitespace, so multiple/Unicode whitespace between
+    /// words is collapsed rather than producing empty tokens.
     private var wordCount: Int {
-        text.split { $0 == " " || $0 == "\n" || $0 == "\t" }.count
+        text.split(whereSeparator: { $0.isWhitespace }).count
     }
     private var lineCount: Int {
         text.isEmpty ? 0 : text.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+
+    /// "1 line" / "2 lines": appends "s" only when the count is not 1.
+    private func pluralize(_ n: Int, _ noun: String) -> String {
+        "\(n) \(noun)\(n == 1 ? "" : "s")"
     }
 }
 
@@ -170,6 +190,7 @@ private struct ImageClipEditor: View {
             footer
         }
         .frame(minWidth: 520, minHeight: 460)
+        .background(tokens.cardSurface)
     }
 
     private var toolbar: some View {
@@ -195,8 +216,9 @@ private struct ImageClipEditor: View {
             }
             Spacer()
             if let working {
-                Text("\(Int(pixelSize(working).width)) × \(Int(pixelSize(working).height))")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("\(Int(pixelSize(working).width)) x \(Int(pixelSize(working).height))")
+                    .font(PanelTypography.metadata(settings))
+                    .foregroundStyle(tokens.textSecondary)
             }
         }
         .padding(8)
@@ -218,8 +240,7 @@ private struct ImageClipEditor: View {
                 .onAppear { canvasSize = geo.size }
                 .onChange(of: geo.size) { canvasSize = geo.size }
             } else {
-                Text("Could not load the image.")
-                    .foregroundStyle(.secondary)
+                imageLoadError
                     .frame(width: geo.size.width, height: geo.size.height)
             }
         }
@@ -227,12 +248,27 @@ private struct ImageClipEditor: View {
         .background(tokens.scrollBackground)
     }
 
+    /// Error treatment mirroring the panel's empty state (icon + themed message),
+    /// shown when the clip's image file cannot be loaded.
+    private var imageLoadError: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text("Could not load the image. The file may have been moved or deleted.")
+                .font(PanelTypography.body(settings))
+                .foregroundStyle(tokens.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+    }
+
     @ViewBuilder
     private func cropOverlay(fitted: CGSize) -> some View {
         if cropping, let rect = selectionRectInView(fitted: fitted) {
             Rectangle()
-                .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                .background(Color.accentColor.opacity(0.12))
+                .strokeBorder(tokens.accent, lineWidth: 1.5)
+                .background(tokens.accent.opacity(0.12))
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
         }
@@ -251,7 +287,11 @@ private struct ImageClipEditor: View {
     private var footer: some View {
         HStack {
             if let saveError {
-                Text(saveError).font(.caption).foregroundStyle(.red)
+                // System red for the destructive/error state; ThemeTokens has no
+                // dedicated danger token, and this matches the panel's accent vocabulary.
+                Text(saveError)
+                    .font(PanelTypography.metadata(settings))
+                    .foregroundStyle(Color(nsColor: .systemRed))
             }
             Button("Save a copy...") { saveCopy() }
             Spacer()

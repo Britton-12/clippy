@@ -4,7 +4,7 @@ import SwiftUI
 /// failed) and publishes state for a sheet. Building the service from settings,
 /// running the async call, and surfacing errors all live here so call sites stay
 /// a one-liner. The actual write happens in the caller's `onApply`, after the
-/// user approves — the preview + confirm contract.
+/// user approves: the preview + confirm contract.
 @MainActor
 final class AIActionRunner: ObservableObject {
     enum Phase: Equatable {
@@ -49,6 +49,9 @@ final class AIActionRunner: ObservableObject {
 /// before/after when the action edits existing content), and Apply / Cancel.
 struct AIActionSheet: View {
     @ObservedObject var runner: AIActionRunner
+    // Theme tokens so the sheet's surfaces/text track a theme switch like the panel.
+    @ObservedObject private var settings = AppSettings.shared
+    private var tokens: ThemeTokens { settings.theme }
     /// Called with the approved text when the user taps Apply.
     let onApply: (AIProposal) -> Void
 
@@ -77,7 +80,7 @@ struct AIActionSheet: View {
                 .font(.headline)
             Text(message)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
                 .textSelection(.enabled)
             HStack {
                 Spacer()
@@ -108,19 +111,23 @@ struct AIActionSheet: View {
         ScrollView {
             Text(text)
                 .font(.body)
+                .foregroundStyle(tokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
         .frame(maxHeight: 220)
         .padding(8)
-        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(tokens.cardBorder))
     }
 
+    // Two stacked full-text boxes are a weak diff (no word-level highlighting);
+    // tracked as a follow-up. Boxes are themed and clearly labeled below.
     private func diff(original: String, proposed: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Before").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("Before").font(.caption.weight(.semibold)).foregroundStyle(tokens.textSecondary)
             box(original)
-            Text("After").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("After").font(.caption.weight(.semibold)).foregroundStyle(tokens.textSecondary)
             box(proposed)
         }
     }

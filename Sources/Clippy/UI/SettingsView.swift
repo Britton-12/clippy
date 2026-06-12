@@ -202,7 +202,13 @@ private struct WindowAppearanceApplier: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         let target = appearance
-        DispatchQueue.main.async { view.window?.appearance = target }
+        // The hosting window is often nil during the first layout pass, so defer
+        // to the next runloop turn. Apply only when the value actually changed to
+        // avoid redundant repaints, and no-op while the window is still nil.
+        DispatchQueue.main.async {
+            guard let window = view.window, window.appearance != target else { return }
+            window.appearance = target
+        }
     }
 }
 
@@ -221,7 +227,7 @@ private struct GeneralSettingsTab: View {
         Form {
             Section("Hotkey") {
                 LabeledContent("Open panel", value: "\u{2318}\u{21E7}V")
-                Text("The hotkey is fixed at Command-Shift-V.")
+                Text("Press this combination anywhere to open the Clippy panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -301,7 +307,7 @@ private struct AppearanceSettingsTab: View {
                         Text(preset.label).tag(preset)
                     }
                 }
-                ThemeSwatchStrip(tokens: settings.theme)
+                ThemeSwatchStrip(tokens: settings.theme, themeName: settings.themePreset.label)
 
                 Picker("System appearance", selection: $settings.appearanceMode) {
                     ForEach(AppearanceMode.allCases) { mode in
@@ -473,20 +479,75 @@ private struct AppearanceSettingsTab: View {
     /// One editable surface color: a hex field plus the macOS color wheel, both
     /// bound to the same stored hex string so either updates the other.
     private func customColorRow(_ title: String, _ hex: Binding<String>) -> some View {
-        let color = Binding<Color>(
+        CustomColorRow(title: title, hex: hex)
+    }
+}
+
+/// A hex color field plus the macOS color wheel, both bound to the same stored
+/// hex string. The text field validates on commit (not per keystroke) so an
+/// invalid entry never repaints the app the fallback magenta: a bad value is
+/// rejected and flagged inline instead of being written back to settings.
+private struct CustomColorRow: View {
+    let title: String
+    let hex: Binding<String>
+
+    /// Local editable copy so keystrokes do not write straight through to the
+    /// stored hex (which would repaint live with partial/invalid input).
+    @State private var draft: String = ""
+    @State private var isInvalid = false
+
+    private var color: Binding<Color> {
+        Binding(
             get: { Color(themeHex: hex.wrappedValue) },
-            set: { hex.wrappedValue = $0.themeHexString }
+            set: { newColor in
+                let value = newColor.themeHexString
+                hex.wrappedValue = value
+                draft = value
+                isInvalid = false
+            }
         )
-        return LabeledContent(title) {
-            HStack(spacing: 8) {
-                TextField("#RRGGBB", text: hex)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 92)
-                ColorPicker("", selection: color, supportsOpacity: false)
-                    .labelsHidden()
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 8) {
+                    TextField("#RRGGBB", text: $draft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 92)
+                        .foregroundStyle(isInvalid ? Color.red : Color.primary)
+                        .onSubmit { commit() }
+                    ColorPicker("", selection: color, supportsOpacity: false)
+                        .labelsHidden()
+                }
+                if isInvalid {
+                    Text("Enter a hex color like #1F2328.")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
             }
         }
+        .onAppear { draft = hex.wrappedValue }
+        // Keep the field in sync when the stored value changes elsewhere
+        // (color wheel, Copy current theme, Reset to light).
+        .onChange(of: hex.wrappedValue) { _, newValue in
+            if newValue != draft { draft = newValue; isInvalid = false }
+        }
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // NSColor(themeHex:) returns nil for anything that is not a valid
+        // #RGB/#RRGGBB/#RRGGBBAA value, so it doubles as the validity check.
+        guard NSColor(themeHex: trimmed) != nil else {
+            isInvalid = true
+            return
+        }
+        isInvalid = false
+        let normalized = trimmed.hasPrefix("#") ? trimmed : "#\(trimmed)"
+        hex.wrappedValue = normalized
+        draft = normalized
     }
 }
 
@@ -494,6 +555,7 @@ private struct AppearanceSettingsTab: View {
 /// so the user sees a palette change before opening the panel.
 private struct ThemeSwatchStrip: View {
     let tokens: ThemeTokens
+    let themeName: String
 
     var body: some View {
         HStack(spacing: 0) {
@@ -507,7 +569,10 @@ private struct ThemeSwatchStrip: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .strokeBorder(tokens.cardBorder, lineWidth: 1)
         )
-        .accessibilityHidden(true)
+        // Decorative swatches carry no per-rectangle meaning, so collapse them
+        // into one element that announces the active theme to VoiceOver.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Theme preview: \(themeName)")
     }
 
     private var swatches: [Color] {
@@ -520,6 +585,8 @@ private struct ThemeSwatchStrip: View {
 private struct CaptureSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var ignoredAppsText = AppSettings.shared.ignoredBundleIDs.joined(separator: "\n")
+    @State private var ignoredAppsError: String?
+    @FocusState private var ignoredAppsFocused: Bool
     @State private var soundVolumeSlider: Double = Double(AppSettings.shared.captureSoundVolume)
 
     private var tokens: ThemeTokens { settings.theme }
@@ -621,11 +688,12 @@ private struct CaptureSettingsTab: View {
                             .font(.system(.caption, design: .monospaced))
                             .frame(height: 90)
                             .cornerRadius(6)
-                            .onChange(of: ignoredAppsText) { _, newValue in
-                                settings.ignoredBundleIDs = newValue
-                                    .split(whereSeparator: \.isNewline)
-                                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                                    .filter { !$0.isEmpty }
+                            .focused($ignoredAppsFocused)
+                            // Commit on focus loss instead of per keystroke so a
+                            // half-typed bundle ID is not persisted, and so invalid
+                            // entries can be flagged rather than silently kept.
+                            .onChange(of: ignoredAppsFocused) { _, focused in
+                                if !focused { commitIgnoredApps() }
                             }
                         if ignoredAppsText.isEmpty {
                             Text("com.apple.keychainaccess\ncom.1password.1password")
@@ -640,6 +708,11 @@ private struct CaptureSettingsTab: View {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(tokens.cardBorder, lineWidth: 1)
                     )
+                    if let ignoredAppsError {
+                        Text(ignoredAppsError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
 
@@ -653,6 +726,35 @@ private struct CaptureSettingsTab: View {
             .font(.callout)
         }
         .formStyle(.grouped)
+    }
+
+    /// Parse the editor on focus loss: persist only well-formed bundle IDs and
+    /// report any rejected lines inline rather than storing garbage silently.
+    private func commitIgnoredApps() {
+        let lines = ignoredAppsText
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let valid = lines.filter(Self.isPlausibleBundleID)
+        let invalid = lines.filter { !Self.isPlausibleBundleID($0) }
+        settings.ignoredBundleIDs = valid
+        ignoredAppsError = invalid.isEmpty
+            ? nil
+            : "Ignored invalid bundle ID(s): \(invalid.joined(separator: ", "))"
+    }
+
+    /// A reverse-DNS bundle ID is dot-separated alphanumeric/hyphen labels, at
+    /// least two of them (e.g. com.apple.finder). This rejects obvious typos
+    /// such as spaces, leading dots, or single-word entries without coupling to
+    /// any external validator.
+    private static func isPlausibleBundleID(_ value: String) -> Bool {
+        let labels = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        let allowed = CharacterSet(charactersIn:
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        return labels.allSatisfy { label in
+            !label.isEmpty && CharacterSet(charactersIn: String(label)).isSubset(of: allowed)
+        }
     }
 }
 
@@ -916,9 +1018,13 @@ private struct IntegrationsSettingsTab: View {
                         Task { await ICloudSyncService.shared.sync() }
                     }
                     .disabled(!settings.iCloudSyncEnabled || cloud.syncing || !cloud.isAvailable)
+                    // The service reports a write failure through `status` as a
+                    // "Sync failed: ..." string; flag that inline in red the same
+                    // way the launch-at-login error is shown, instead of letting
+                    // it read as ordinary secondary status text.
                     Text(cloud.isAvailable ? cloud.status : "iCloud Drive is off on this Mac.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(syncStatusFailed ? Color.red : Color.secondary)
                 }
                 Text("Writes your categories and pinned clips to an iCloud Drive file (iCloud Drive > Clippy) that your other Macs read on sync. Non-destructive: it merges, never clears. No CloudKit, no special entitlement.")
                     .font(.caption)
@@ -927,6 +1033,13 @@ private struct IntegrationsSettingsTab: View {
 
         }
         .formStyle(.grouped)
+    }
+
+    /// True when the iCloud service has reported a sync write failure. The
+    /// service surfaces failures by setting `status` to a "Sync failed:" string,
+    /// so match that prefix rather than adding a property to that service.
+    private var syncStatusFailed: Bool {
+        cloud.isAvailable && cloud.status.hasPrefix("Sync failed")
     }
 
     /// Shared NSSavePanel scaffold. Returns the result string to display, or nil

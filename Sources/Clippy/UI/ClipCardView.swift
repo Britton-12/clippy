@@ -25,8 +25,15 @@ struct ClipCardView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    /// True while the primary mouse button is held over the card, for the
+    /// brief pressed-state feedback that single-click paste otherwise lacks.
+    @State private var isPressed = false
 
     private var tokens: ThemeTokens { settings.theme }
+
+    /// Icon point size derived from the user's base font so glyphs scale with
+    /// text rather than staying fixed at 12/13/14pt.
+    private var iconSize: CGFloat { CGFloat(settings.fontSizeBase) + 1 }
     /// Whether the title field is in inline-edit mode. Driven by the parent via
     /// isRenamingBinding so context-menu "Rename..." can trigger it externally.
     @Binding var isRenaming: Bool
@@ -109,14 +116,36 @@ struct ClipCardView: View {
         }
         .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // Constant-width base border so selection never reflows content. The
+        // 1pt strokeBorder insets the same amount whether selected or not.
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(cardBorderColor, lineWidth: isSelected ? 2 : 1)
+                .strokeBorder(cardBorderColor, lineWidth: 1)
         )
+        // Selection ring drawn on top as a centered stroke (no content inset),
+        // so toggling selection shifts nothing.
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(tokens.accent, lineWidth: 2)
+                .opacity(isSelected ? 1 : 0)
+        )
+        // Brief pressed feedback so single-click paste feels like a button.
+        .scaleEffect(isPressed ? 0.98 : 1)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: isPressed)
         .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            isHovering = hovering
+            // The whole card is clickable (single-click pastes); show the hand
+            // cursor so that affordance is discoverable.
+            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        // minimumDuration 0 tracks press/release for the scale effect without
+        // consuming the parent's tap-to-paste or drag gestures.
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, perform: {}) { pressing in
+            isPressed = pressing
+        }
         .help(kind.label)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
@@ -142,13 +171,19 @@ struct ClipCardView: View {
 
             Spacer(minLength: 4)
 
-            if isHovering {
-                hoverActions
-            } else {
+            // Keep metadata and actions in the same trailing slot (overlay, not
+            // swap) so hovering does not shift layout or hide the timestamp.
+            // The metadata stays mounted underneath and only fades out.
+            ZStack(alignment: .trailing) {
                 trailingMetadata
+                    .opacity(isHovering ? 0 : 1)
+                hoverActions
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
             }
         }
-        .frame(height: 20)
+        // minHeight lets the row grow with larger fonts instead of clipping.
+        .frame(minHeight: 20)
     }
 
     /// Icon slot: shows the pinned category's icon when the clip is categorized,
@@ -165,7 +200,7 @@ struct ClipCardView: View {
                 .frame(width: 16, height: 16)
         } else {
             Image(systemName: "app.dashed")
-                .font(.system(size: 12))
+                .font(.system(size: iconSize))
                 .foregroundStyle(tokens.textSecondary)
                 .frame(width: 16, height: 16)
         }
@@ -177,29 +212,31 @@ struct ClipCardView: View {
         switch category.iconKind {
         case .symbol:
             Image(systemName: category.iconValue)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(Color(hexString: category.colorHex))
         case .emoji:
             Text(category.iconValue)
-                .font(.system(size: 13))
+                .font(.system(size: iconSize + 1))
         case .appLogo:
             if let icon = AppIconProvider.shared.icon(forBundleID: category.iconValue) {
                 Image(nsImage: icon).resizable()
             } else {
                 Image(systemName: "app.dashed")
-                    .font(.system(size: 12))
+                    .font(.system(size: iconSize))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// The title text shown in normal (non-editing) state.
+    /// The title text shown in normal (non-editing) state. No double-click
+    /// rename here: single-click on the card pastes (fast-paste design), so a
+    /// double-click would fire a paste on its first click. Rename is reachable
+    /// via the hover pencil-cursor button and the context-menu "Rename...".
     private var titleLabel: some View {
         Text(clip.displayTitle)
             .font(PanelTypography.title(settings))
             .foregroundStyle(settings.highContrastCardText ? tokens.textPrimary : tokens.textSecondary)
             .lineLimit(1)
-            .onTapGesture(count: 2) { beginRename() }
     }
 
     /// Inline rename field. The background is the standard editable-field color
@@ -214,7 +251,8 @@ struct ClipCardView: View {
             onCommit: { commitRename($0) },
             onCancel: { cancelRename() }
         )
-        .frame(height: 18)
+        // minHeight, not a fixed height, so larger fonts are not clipped.
+        .frame(minHeight: 18)
         .padding(.horizontal, 6)
         .padding(.vertical, 1)
         // Opposite-luminance fill so the field never blends into the card:
@@ -254,20 +292,20 @@ struct ClipCardView: View {
             ForEach(Array(categoryColors.prefix(3).enumerated()), id: \.offset) { _, color in
                 Circle()
                     .fill(color)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 9, height: 9)
             }
             Image(systemName: kind.iconName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(kind.tint)
             if clip.isRich {
                 Image(systemName: "textformat")
-                    .font(.system(size: 12))
+                    .font(.system(size: iconSize))
                     .foregroundStyle(tokens.textSecondary)
                     .help("Has rich formatting")
             }
             if isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 12))
+                    .font(.system(size: iconSize))
                     .foregroundStyle(tokens.accent)
             }
             Text(clip.createdAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
@@ -278,7 +316,7 @@ struct ClipCardView: View {
     }
 
     private var hoverActions: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             if !isImage {
                 cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
                 cardActionButton("pencil", help: "Edit", action: onEdit)
@@ -289,18 +327,31 @@ struct ClipCardView: View {
                 help: isPinned ? "Unpin" : "Pin",
                 action: onTogglePin
             )
-            cardActionButton("trash", help: "Delete", action: onDelete)
+            // Visually separate the destructive action so Delete is not packed
+            // flush against Pin where a misclick is easy.
+            Divider()
+                .frame(height: 14)
+                .padding(.horizontal, 2)
+            cardActionButton("trash", help: "Delete", role: .destructive, action: onDelete)
         }
     }
 
-    private func cardActionButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func cardActionButton(
+        _ symbol: String,
+        help: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: 24, height: 20)
+                .font(.system(size: iconSize, weight: .medium))
+                // Larger hit target than the glyph; contentShape makes the whole
+                // frame clickable, not just the opaque pixels.
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(tokens.textSecondary)
+        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : tokens.textSecondary)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -369,7 +420,8 @@ struct ClipCardView: View {
     }
 
     private var cardBorderColor: Color {
-        if isSelected { return tokens.accent }
+        // Selection is drawn by a separate overlay ring, so the base border keeps
+        // its normal per-style color even when selected (no width change here).
         switch settings.cardStyle {
         case .filled:
             return tokens.cardBorder

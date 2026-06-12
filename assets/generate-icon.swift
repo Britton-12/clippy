@@ -136,9 +136,26 @@ ctx.saveGState()
 ctx.addPath(clipPath)
 ctx.clip()
 
-// Draw the mascot scaled to fill the tile.
+// Draw the mascot inset inside the tile. WHY: the full-bleed source fills
+// 1024x1024 with zero margin, so drawing it edge-to-edge let the rounded
+// corners slice off the art; insetting keeps breathing room inside the curve.
 ctx.interpolationQuality = .high
-ctx.draw(sourceCG, in: tileRect)
+let artRect = tileRect.insetBy(dx: 90, dy: 90)
+// scaledToFit: preserve aspect ratio, center within artRect (square source -> exact fit).
+let srcAspect = CGFloat(sourceCG.width) / CGFloat(sourceCG.height)
+var drawW = artRect.width
+var drawH = artRect.width / srcAspect
+if drawH > artRect.height {
+    drawH = artRect.height
+    drawW = artRect.height * srcAspect
+}
+let drawRect = CGRect(
+    x: artRect.midX - drawW / 2,
+    y: artRect.midY - drawH / 2,
+    width: drawW,
+    height: drawH
+)
+ctx.draw(sourceCG, in: drawRect)
 
 ctx.restoreGState()
 
