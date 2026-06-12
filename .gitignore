@@ -47,3 +47,4 @@ assets/AppIcon.iconset/
 # Pre-commit verification:
 #   1. git status            # nothing unexpected staged?
 #   2. git ls-files | grep -E '\.(env|key|pem|sqlite)$'   # must be empty
+.orchestrator/

@@ -163,6 +163,19 @@ final class ClipStore: ObservableObject {
         clip.mediaFilename.map { database.media.url(for: $0) }
     }
 
+    /// Save script stdout as a new clip in history. Distinct from the capture
+    /// pipeline: no deduplication, source set to "Clippy Scripts".
+    @discardableResult
+    func saveScriptOutput(_ text: String) -> Bool {
+        do {
+            try database.insertTextClip(text)
+            return true
+        } catch {
+            NSLog("Clippy: failed to save script output: \(error)")
+            return false
+        }
+    }
+
     func renameClip(_ clip: Clip, userTitle: String?) {
         guard let id = clip.id else { return }
         // Treat empty string the same as nil (clear the custom title).

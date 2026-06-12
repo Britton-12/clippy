@@ -12,8 +12,11 @@ enum StatusBarIcon {
     /// The Clippy paperclip as a template image. `paused` closes the eyes into
     /// sleepy lids to signal capture is paused.
     static func image(paused: Bool = false) -> NSImage {
-        let image = NSImage(size: canvas, flipped: false) { _ in
-            draw(in: canvas, paused: paused)
+        let image = NSImage(size: canvas, flipped: false) { destRect in
+            // Use destRect rather than the fixed canvas constant: on Retina the
+            // system asks for a 2x backing rect (e.g. 36x36 for an 18pt image)
+            // and we must fill it entirely, otherwise the top half is blank.
+            draw(in: destRect.size, paused: paused)
             return true
         }
         image.isTemplate = true

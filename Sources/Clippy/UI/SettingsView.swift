@@ -805,6 +805,19 @@ private struct IntegrationsSettingsTab: View {
             Section("1Password") {
                 Toggle("Show 1Password vault in the sidebar", isOn: $settings.onePasswordEnabled)
                 TextField("Vault name", text: $settings.onePasswordVault, prompt: Text("Clippy"))
+                Toggle("Auto-clear clipboard after copying a secret",
+                       isOn: $settings.onePasswordAutoClearClipboard)
+                if settings.onePasswordAutoClearClipboard {
+                    Stepper(
+                        "Clear after \(settings.onePasswordAutoClearDelaySecs) seconds",
+                        value: $settings.onePasswordAutoClearDelaySecs,
+                        in: 10...600,
+                        step: 10
+                    )
+                    Text("The pasteboard is only cleared if it still holds the copied secret (no effect if you have already pasted or copied something else).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
                     Image(systemName: OnePasswordService.isInstalled ? "checkmark.circle.fill" : "xmark.circle")
                         .foregroundStyle(OnePasswordService.isInstalled ? .green : .secondary)
@@ -814,7 +827,7 @@ private struct IntegrationsSettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("Secrets in this vault appear as a sidebar category. Copying one reveals it through 1Password (you approve), places it on the clipboard, and is never recorded in history.")
+                Text("Secrets in this vault appear as a sidebar category. Expanding an item shows all its fields; each field can be copied individually. Concealed values are revealed in-place with a toggle. TOTP codes are fetched fresh on each copy. Nothing is recorded in history.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

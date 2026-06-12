@@ -78,6 +78,8 @@ final class AppSettings: ObservableObject {
         // 1Password integration
         static let onePasswordEnabled = "onePasswordEnabled"
         static let onePasswordVault = "onePasswordVault"
+        static let onePasswordAutoClearClipboard = "onePasswordAutoClearClipboard"
+        static let onePasswordAutoClearDelaySecs = "onePasswordAutoClearDelaySecs"
         // iCloud sync
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
     }
@@ -244,6 +246,15 @@ final class AppSettings: ObservableObject {
     @Published var onePasswordVault: String {
         didSet { defaults.set(onePasswordVault, forKey: Keys.onePasswordVault) }
     }
+    /// When true, the clipboard is cleared N seconds after copying a 1Password
+    /// secret (only if the pasteboard still holds that exact write).
+    @Published var onePasswordAutoClearClipboard: Bool {
+        didSet { defaults.set(onePasswordAutoClearClipboard, forKey: Keys.onePasswordAutoClearClipboard) }
+    }
+    /// Seconds to wait before auto-clearing a copied 1Password secret. Default 90.
+    @Published var onePasswordAutoClearDelaySecs: Int {
+        didSet { defaults.set(onePasswordAutoClearDelaySecs, forKey: Keys.onePasswordAutoClearDelaySecs) }
+    }
 
     // MARK: - iCloud sync
 
@@ -364,6 +375,8 @@ final class AppSettings: ObservableObject {
             Keys.aiAutoSuggestTitles: false,
             Keys.onePasswordEnabled: false,
             Keys.onePasswordVault: "Clippy",
+            Keys.onePasswordAutoClearClipboard: true,
+            Keys.onePasswordAutoClearDelaySecs: 90,
             Keys.iCloudSyncEnabled: false,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
@@ -420,6 +433,11 @@ final class AppSettings: ObservableObject {
         aiAutoSuggestTitles = defaults.bool(forKey: Keys.aiAutoSuggestTitles)
         onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
         onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? "Clippy"
+        onePasswordAutoClearClipboard = defaults.bool(forKey: Keys.onePasswordAutoClearClipboard)
+        onePasswordAutoClearDelaySecs = {
+            let stored = defaults.integer(forKey: Keys.onePasswordAutoClearDelaySecs)
+            return stored >= 10 && stored <= 600 ? stored : 90
+        }()
         iCloudSyncEnabled = defaults.bool(forKey: Keys.iCloudSyncEnabled)
     }
 

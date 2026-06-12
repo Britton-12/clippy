@@ -36,6 +36,8 @@ struct ClipListView: View {
             return store.clips.filter { store.categoryIDs(for: $0).contains(categoryID) }
         case .onePassword:
             return []
+        case .scripts:
+            return []
         }
     }
 
@@ -97,7 +99,9 @@ struct ClipListView: View {
 
     @ViewBuilder
     private var paneContent: some View {
-        if selection == .onePassword {
+        if selection == .scripts {
+            ScriptsPanelView(store: store, onOpenSettings: onOpenSettings)
+        } else if selection == .onePassword {
             OnePasswordView()
         } else if visibleClips.isEmpty {
             emptyState
@@ -347,6 +351,7 @@ struct ClipListView: View {
         case .history: return "clipboard"
         case .category: return "tray"
         case .onePassword: return "key.fill"
+        case .scripts: return "terminal"
         }
     }
 
@@ -361,6 +366,8 @@ struct ClipListView: View {
             return "No clips in this category yet. Right-click a clip and choose Categories, or drag a card onto the category."
         case .onePassword:
             return "No secrets shared to Clippy yet."
+        case .scripts:
+            return "No scripts yet."
         }
     }
 

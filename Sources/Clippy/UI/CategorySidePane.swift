@@ -30,6 +30,7 @@ struct CategorySidePane: View {
                     if settings.onePasswordEnabled {
                         onePasswordRow
                     }
+                    scriptsRow
                 }
             }
             Spacer(minLength: 0)
@@ -131,6 +132,20 @@ struct CategorySidePane: View {
             selection = selection == .onePassword ? .history : .onePassword
         }
         .accessibilityLabel("1Password secrets")
+    }
+
+    private var scriptsRow: some View {
+        sidePaneRow(
+            isSelected: selection == .scripts,
+            tint: Color(nsColor: .systemGreen),
+            icon: { Image(systemName: "terminal.fill").font(.system(size: 12, weight: .semibold)) },
+            title: "Scripts",
+            count: nil,
+            help: "Run saved scripts"
+        ) {
+            selection = selection == .scripts ? .history : .scripts
+        }
+        .accessibilityLabel("Scripts")
     }
 
     private var newCategoryRow: some View {
