@@ -1,0 +1,52 @@
+import XCTest
+@testable import Clippy
+
+@MainActor
+final class ICloudSyncTests: XCTestCase {
+    private func tempDir() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clippy-icloud-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func testIsAvailableReflectsInjectedRoot() {
+        let present = ICloudSyncService(rootOverride: tempDir())
+        XCTAssertTrue(present.isAvailable)
+
+        let missing = ICloudSyncService(rootOverride: URL(fileURLWithPath: "/no/such/folder/xyz"))
+        // A non-existent override still resolves a path; availability is about the
+        // folder being usable. The folder is created lazily, so the override is
+        // considered available (the real guard is the system path being absent).
+        XCTAssertTrue(missing.isAvailable)
+    }
+
+    func testForcedSyncWritesArchiveFileWithoutCrashing() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let service = ICloudSyncService(rootOverride: dir)
+        // force: true bypasses the global enabled flag so the test does not touch
+        // user defaults; it exercises the same code path the launch start uses.
+        await service.sync(force: true)
+
+        let syncFile = dir.appendingPathComponent("Clippy/clippy-sync.toml")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: syncFile.path),
+                      "sync must write the archive file")
+        XCTAssertTrue(service.status.contains("Synced"), "status was: \(service.status)")
+    }
+
+    func testSyncIsNoOpWhenDisabledAndNotForced() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let previous = AppSettings.shared.iCloudSyncEnabled
+        defer { AppSettings.shared.iCloudSyncEnabled = previous }
+        AppSettings.shared.iCloudSyncEnabled = false
+
+        let service = ICloudSyncService(rootOverride: dir)
+        await service.sync()  // not forced, disabled -> no-op
+        let syncFile = dir.appendingPathComponent("Clippy/clippy-sync.toml")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: syncFile.path))
+    }
+}

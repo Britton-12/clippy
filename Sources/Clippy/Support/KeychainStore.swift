@@ -5,7 +5,7 @@ import Security
 /// integration tokens) as generic-password items. Values never touch
 /// UserDefaults. Keyed by a stable account string under one service.
 struct KeychainStore {
-    static let shared = KeychainStore(service: "com.henssler.clippy.secrets")
+    static let shared = KeychainStore(service: "com.bytesavvy.clippy.secrets")
 
     let service: String
 

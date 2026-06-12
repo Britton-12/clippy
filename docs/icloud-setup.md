@@ -1,55 +1,42 @@
-# iCloud sync setup
+# iCloud sync
 
-Clippy's iCloud sync mirrors clips and categories to your private CloudKit
-database (`CloudSyncEngine` + `CloudRecordMapper`). The record-mapping logic is
-unit-tested (`CloudRecordMapperTests`), but live device-to-device sync only works
-in a **signed build with the iCloud entitlement**. SwiftPM `swift run` and the
-test bundle cannot exercise CloudKit, so the toggle is a safe no-op there.
+Clippy syncs through **iCloud Drive**, not CloudKit. This is deliberate: CloudKit
+needs App Store or development provisioning that a directly-distributed
+(Developer ID + Sparkle) app cannot have, and calling CloudKit without that
+entitlement crashes the app. The iCloud Drive approach needs no entitlement and
+works in the normal release build.
 
-## What a signed build needs
+## How it works
 
-1. An Apple Developer account with iCloud + CloudKit enabled.
-2. The CloudKit container `iCloud.com.henssler.clippy` (this string is
-   `CloudSchema.containerIdentifier` in `CloudRecordMapper.swift` — change both if
-   you use a different container).
-3. An entitlements file applied at codesign time. A template is committed at
-   `Clippy.entitlements`:
+When "Sync clips and categories through iCloud Drive" is on, Clippy writes its
+archive to:
 
-   ```xml
-   <key>com.apple.developer.icloud-container-identifiers</key>
-   <array><string>iCloud.com.henssler.clippy</string></array>
-   <key>com.apple.developer.icloud-services</key>
-   <array><string>CloudKit</string></array>
-   <key>com.apple.developer.ubiquity-kvstore-identifier</key>
-   <string>$(TeamIdentifierPrefix)com.henssler.clippy</string>
-   ```
+```
+~/Library/Mobile Documents/com~apple~CloudDocs/Clippy/clippy-sync.toml
+```
 
-4. Sign the packaged `.app` with these entitlements (the release pipeline's
-   `codesign` step gains `--entitlements Clippy.entitlements`), using a
-   provisioning profile that includes the container.
+That folder is the local mirror of your iCloud Drive, so the file uploads
+automatically and appears on your other Macs under **iCloud Drive > Clippy**.
+On each sync (at launch, when you toggle it on, or via "Sync now") Clippy:
 
-## CloudKit schema
+1. Reads the file another Mac may have written and merges it in
+   (`ClippyArchive.importTOML`, which only adds and updates, never clears), then
+2. Writes the merged local state back.
 
-The engine creates a custom zone `ClippyZone` and two record types. In the
-CloudKit dashboard (or via first-run in the Development environment, which
-auto-creates types), ensure these exist and are queryable:
+Because the merge is non-destructive, two Macs converge instead of overwriting
+each other.
 
-- `Clip`: `contentText` (String), `typeIdentifier` (String), `contentKind`
-  (String), `createdAt` (Date/Time), `userTitle`, `sourceAppName`,
-  `sourceAppBundleID`, `mediaFilename`, `thumbFilename`, `pixelWidth` (Int),
-  `pixelHeight` (Int), `byteSize` (Int).
-- `Category`: `name`, `colorHex`, `iconKind`, `iconValue`, `sortOrder` (Int),
-  `isStarter` (Int), `createdAt` (Date/Time).
+## Requirements
 
-The pull step queries with a `TRUEPREDICATE`, which requires the record types'
-`recordName` to be queryable — the default in the Development environment.
+- iCloud Drive enabled in System Settings > [your name] > iCloud.
+- Nothing else. No CloudKit container, no entitlement, no provisioning profile.
 
-## Limitations (this version)
+## Scope and limits
 
-- Image clip **bytes** are not yet uploaded as `CKAsset`s; image clips sync their
-  metadata but are skipped on pull (text clips and categories sync fully).
-- Pull is a full-zone fetch, not an incremental `CKServerChangeToken` delta. Fine
-  for the typical history size; a future version should move to
-  `CKFetchRecordZoneChangesOperation` with a persisted change token and a
-  `CKDatabaseSubscription` for push-driven refresh.
-- Merge is non-destructive (upsert by content key); it never deletes local data.
+- Categories and the clips pinned into them sync (the same data the
+  `clippy.toml` export covers). Loose, unpinned history is intentionally local.
+- Image clips sync their metadata via the archive; the image **bytes** are not
+  copied across devices in this version.
+- The merge is content-based and runs on demand; it is not real-time. For a
+  personal setup this is plenty; a future version could watch the file for
+  changes and sync continuously.

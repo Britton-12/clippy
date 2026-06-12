@@ -35,8 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipDatabase.shared.media.sweepOrphans(referencedFilenames: referenced)
         }
 
-        // Kick off an iCloud sync if the user has enabled it (safe no-op otherwise).
-        CloudSyncEngine.shared.startIfEnabled()
+        // Kick off an iCloud Drive sync if the user has enabled it (safe no-op
+        // otherwise; never touches CloudKit, so it cannot crash on launch).
+        ICloudSyncService.shared.startIfEnabled()
 
         HotKeyCenter.shared.handler = { [weak self] in
             self?.panelController.toggle()
@@ -81,6 +82,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panelController.show()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     self?.panelController.snapshotPanel(to: url)
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+        // Proves the iCloud sync path runs end to end (file write/read, archive
+        // round-trip) without crashing, against a temp folder instead of the real
+        // iCloud Drive. Used to validate that enabling sync can never crash.
+        if let flagIndex = CommandLine.arguments.firstIndex(of: "--icloud-selftest"),
+           CommandLine.arguments.indices.contains(flagIndex + 1)
+        {
+            let dir = URL(fileURLWithPath: CommandLine.arguments[flagIndex + 1])
+            let service = ICloudSyncService(rootOverride: dir)
+            Task { @MainActor in
+                await service.sync(force: true)
+                print("ICLOUD_SELFTEST status=\(service.status)")
+                let synced = dir.appendingPathComponent("Clippy/clippy-sync.toml")
+                print("ICLOUD_SELFTEST file_exists=\(FileManager.default.fileExists(atPath: synced.path))")
+                NSApp.terminate(nil)
+            }
+        }
+        if let flagIndex = CommandLine.arguments.firstIndex(of: "--screenshot-settings"),
+           CommandLine.arguments.indices.contains(flagIndex + 1)
+        {
+            let path = CommandLine.arguments[flagIndex + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.openSettings()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    if let view = self?.settingsWindow?.contentView,
+                       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?
+                            .write(to: URL(fileURLWithPath: path))
+                    }
                     NSApp.terminate(nil)
                 }
             }
@@ -166,12 +200,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 540, height: 560),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
+                styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Clippy Settings"
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: SettingsView())
             window.center()

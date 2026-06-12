@@ -3,29 +3,193 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The settings window. A System-Settings-style sidebar (a fixed list of
+/// sections with colored icon tiles) plus a detail pane, themed to match Clippy.
+/// Built explicitly rather than with TabView, whose macOS 15 default collapses a
+/// multi-tab window into a navigation sidebar with an overflow control.
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    @State private var selection: SettingsSection = SettingsSection(
+        rawValue: ProcessInfo.processInfo.environment["CLIPPY_SETTINGS_SECTION"] ?? "") ?? .general
+
+    private var tokens: ThemeTokens { settings.theme }
 
     var body: some View {
-        TabView {
-            GeneralSettingsTab()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            AppearanceSettingsTab()
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            CaptureSettingsTab()
-                .tabItem { Label("Capture", systemImage: "doc.on.clipboard") }
-            AISettingsTab()
-                .tabItem { Label("AI", systemImage: "sparkles") }
-            ScriptsView()
-                .tabItem { Label("Scripts", systemImage: "terminal") }
-            IntegrationsSettingsTab()
-                .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            detail
         }
-        .frame(width: 540, height: 560)
-        .tint(settings.theme.accent)
-        // Make the settings window track the theme's light/dark appearance and
-        // accent, so the whole app, not just the panel, follows the theme.
+        .frame(width: 780, height: 580)
+        .tint(tokens.accent)
+        // Track the theme's light/dark appearance and accent so the whole app,
+        // not just the panel, follows the theme.
         .background(WindowAppearanceApplier(appearance: Theme.nsAppearance(settings)))
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            brandHeader
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(SettingsSection.allCases) { sidebarRow($0) }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+            Spacer(minLength: 0)
+            footer
+        }
+        .frame(width: 214)
+        .background(tokens.sidebar)
+    }
+
+    private var brandHeader: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: StatusBarIcon.image())
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 24, height: 24)
+                .foregroundStyle(tokens.accent)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Clippy")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(tokens.textPrimary)
+                Text("Settings")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tokens.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        // Clear the window's traffic-light controls (transparent titlebar).
+        .padding(.top, 30)
+        .padding(.bottom, 12)
+    }
+
+    private func sidebarRow(_ section: SettingsSection) -> some View {
+        let isSelected = selection == section
+        return Button { selection = section } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(section.tint.gradient)
+                        .frame(width: 22, height: 22)
+                    Image(systemName: section.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                Text(section.title)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(tokens.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                isSelected ? AnyShapeStyle(tokens.accent.opacity(0.18)) : AnyShapeStyle(.clear),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(section.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 10))
+            Text("Clippy \(Bundle.main.shortVersion)")
+                .font(.system(size: 10))
+        }
+        .foregroundStyle(tokens.textSecondary)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Detail
+
+    private var detail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(selection.title)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(tokens.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 8)
+            Divider()
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(tokens.panel)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selection {
+        case .general: GeneralSettingsTab()
+        case .appearance: AppearanceSettingsTab()
+        case .capture: CaptureSettingsTab()
+        case .ai: AISettingsTab()
+        case .scripts: ScriptsView()
+        case .integrations: IntegrationsSettingsTab()
+        }
+    }
+}
+
+/// The settings sections, in sidebar order, each with a System-Settings-style
+/// colored icon tile.
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, appearance, capture, ai, scripts, integrations
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .appearance: return "Appearance"
+        case .capture: return "Capture"
+        case .ai: return "AI"
+        case .scripts: return "Scripts"
+        case .integrations: return "Integrations"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "gearshape.fill"
+        case .appearance: return "paintpalette.fill"
+        case .capture: return "doc.on.clipboard.fill"
+        case .ai: return "sparkles"
+        case .scripts: return "terminal.fill"
+        case .integrations: return "puzzlepiece.extension.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .general: return Color(nsColor: .systemGray)
+        case .appearance: return Color(nsColor: .systemPink)
+        case .capture: return Color(nsColor: .systemBlue)
+        case .ai: return Color(nsColor: .systemPurple)
+        case .scripts: return Color(nsColor: .systemGreen)
+        case .integrations: return Color(nsColor: .systemOrange)
+        }
+    }
+}
+
+extension Bundle {
+    /// CFBundleShortVersionString, or a dev fallback when running unbundled.
+    var shortVersion: String {
+        (object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
     }
 }
 
@@ -596,7 +760,7 @@ private struct AISettingsTab: View {
 
 private struct IntegrationsSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var cloud = CloudSyncEngine.shared
+    @ObservedObject private var cloud = ICloudSyncService.shared
     @State private var exportResult: String?
     @State private var archiveResult: String?
 
@@ -656,20 +820,20 @@ private struct IntegrationsSettingsTab: View {
             }
 
             Section("iCloud sync") {
-                Toggle("Sync clips and categories via iCloud", isOn: $settings.iCloudSyncEnabled)
+                Toggle("Sync clips and categories through iCloud Drive", isOn: $settings.iCloudSyncEnabled)
                     .onChange(of: settings.iCloudSyncEnabled) {
-                        if settings.iCloudSyncEnabled { CloudSyncEngine.shared.startIfEnabled() }
+                        if settings.iCloudSyncEnabled { ICloudSyncService.shared.startIfEnabled() }
                     }
                 HStack {
                     Button(cloud.syncing ? "Syncing..." : "Sync now") {
-                        Task { await CloudSyncEngine.shared.sync() }
+                        Task { await ICloudSyncService.shared.sync() }
                     }
-                    .disabled(!settings.iCloudSyncEnabled || cloud.syncing)
-                    Text(cloud.status)
+                    .disabled(!settings.iCloudSyncEnabled || cloud.syncing || !cloud.isAvailable)
+                    Text(cloud.isAvailable ? cloud.status : "iCloud Drive is off on this Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("Mirrors your clips and categories to your private iCloud (CloudKit) database so they appear on your other Macs. Requires a signed build with the iCloud entitlement and being signed in to iCloud.")
+                Text("Writes your categories and pinned clips to an iCloud Drive file (iCloud Drive > Clippy) that your other Macs read on sync. Non-destructive: it merges, never clears. No CloudKit, no special entitlement.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
