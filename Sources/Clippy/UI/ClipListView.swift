@@ -24,6 +24,10 @@ struct ClipListView: View {
     /// ID of the clip currently being processed by OCR so the card can show a spinner.
     @State private var ocrProcessingClipID: Int64?
     @FocusState private var searchFocused: Bool
+    /// AI runner used by the context-menu AI submenu.
+    @StateObject private var aiRunner = AIActionRunner()
+    /// The clip the AI action is being run against (needed so onApply can write back).
+    @State private var aiTargetClip: Clip?
 
     /// Active theme token table; every color below reads from this.
     private var tokens: ThemeTokens { settings.theme }
@@ -41,6 +45,8 @@ struct ClipListView: View {
         case .onePassword:
             return []
         case .scripts:
+            return []
+        case .assistant:
             return []
         }
     }
@@ -70,6 +76,17 @@ struct ClipListView: View {
         .tint(tokens.accent)
         .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
         .onChange(of: selection) { _, _ in selectedIndex = 0 }
+        // AI action sheet — shown when a context-menu AI action produces a proposal.
+        .sheet(isPresented: Binding(
+            get: { aiRunner.isPresenting },
+            set: { if !$0 { aiRunner.reset() } }
+        )) {
+            AIActionSheet(runner: aiRunner) { proposal in
+                guard let clip = aiTargetClip else { aiRunner.reset(); return }
+                handleAIProposal(proposal, for: clip)
+                aiRunner.reset()
+            }
+        }
     }
 
     /// Side pane takes a quarter of the panel but never less than 150pt.
@@ -126,6 +143,8 @@ struct ClipListView: View {
             ScriptsPanelView(store: store, onOpenSettings: onOpenSettings)
         } else if selection == .onePassword {
             OnePasswordView()
+        } else if selection == .assistant {
+            AIAssistantPanelView(store: store, onOpenSettings: onOpenSettings)
         } else if visibleClips.isEmpty {
             emptyState
         } else {
@@ -328,6 +347,9 @@ struct ClipListView: View {
             // "Rename..." works for all clip kinds, not just text.
             Button("Rename...") { renamingClipID = clip.id }
             Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
+            if clip.contentKind == .text {
+                aiActionsMenu(for: clip)
+            }
             categoriesMenu(for: clip)
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
@@ -346,6 +368,58 @@ struct ClipListView: View {
                     store.addClip(id: clipID, toCategory: categoryID)
                 }
             }
+        }
+    }
+
+    // MARK: - AI actions context submenu
+
+    @ViewBuilder
+    private func aiActionsMenu(for clip: Clip) -> some View {
+        let actions = AIActionStore.shared.actions
+        if !settings.aiEnabled {
+            Menu {
+                Text("Enable AI in Settings to use AI actions.")
+            } label: {
+                Label("AI", systemImage: "sparkles")
+            }
+        } else {
+            Menu {
+                ForEach(actions) { action in
+                    Button {
+                        runAIAction(action, on: clip)
+                    } label: {
+                        Label(action.name, systemImage: action.symbolName)
+                    }
+                }
+                if actions.isEmpty {
+                    Text("No actions configured.")
+                }
+                Divider()
+                Button("Open AI Assistant") { selection = .assistant }
+            } label: {
+                Label("AI", systemImage: "sparkles")
+            }
+        }
+    }
+
+    private func runAIAction(_ action: AIAction, on clip: Clip) {
+        aiTargetClip = clip
+        let clipText = clip.contentText
+        aiRunner.run { service in
+            try await service.run(action: action, on: clipText)
+        }
+    }
+
+    /// Apply an approved AI proposal to its source clip.
+    private func handleAIProposal(_ proposal: AIProposal, for clip: Clip) {
+        let text = proposal.proposed
+        switch proposal.kind {
+        case .rewrite, .title, .category, .summary:
+            // proposeEdit disposition: overwrite the clip text in-place.
+            store.updateText(of: clip, to: text)
+        case .newClip:
+            // newClip disposition: insert as a fresh history entry.
+            store.saveScriptOutput(text)
         }
     }
 
@@ -391,6 +465,7 @@ struct ClipListView: View {
         case .category: return "tray"
         case .onePassword: return "key.fill"
         case .scripts: return "terminal"
+        case .assistant: return "sparkles"
         }
     }
 
@@ -407,6 +482,8 @@ struct ClipListView: View {
             return "No secrets shared to Clippy yet."
         case .scripts:
             return "No scripts yet."
+        case .assistant:
+            return ""
         }
     }
 

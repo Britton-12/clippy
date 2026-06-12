@@ -31,6 +31,9 @@ struct CategorySidePane: View {
                         onePasswordRow
                     }
                     scriptsRow
+                    if settings.aiEnabled {
+                        assistantRow
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -146,6 +149,20 @@ struct CategorySidePane: View {
             selection = selection == .scripts ? .history : .scripts
         }
         .accessibilityLabel("Scripts")
+    }
+
+    private var assistantRow: some View {
+        sidePaneRow(
+            isSelected: selection == .assistant,
+            tint: Color(nsColor: .systemPurple),
+            icon: { Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)) },
+            title: "Assistant",
+            count: nil,
+            help: "AI Assistant chat"
+        ) {
+            selection = selection == .assistant ? .history : .assistant
+        }
+        .accessibilityLabel("AI Assistant")
     }
 
     private var newCategoryRow: some View {

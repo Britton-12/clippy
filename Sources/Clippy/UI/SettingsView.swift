@@ -696,6 +696,60 @@ private struct AISettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Actions") {
+                AIActionsManagerView()
+                    .frame(height: 220)
+            }
+            .disabled(!settings.aiEnabled)
+
+            Section("Agent and Tools") {
+                Toggle("Allow AI to run my scripts", isOn: $settings.aiAgentAllowScripts)
+                    .disabled(!settings.aiEnabled)
+                Text("When on, the AI Assistant can list and run your saved scripts. You will be shown a confirmation prompt each time before a script runs.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Allow AI to execute generated code", isOn: $settings.aiAgentAllowCodeExecution)
+                    .disabled(!settings.aiEnabled)
+                Text("When on, the AI Assistant can write and execute code in a sandboxed subprocess. You will be shown the code and asked to confirm before it runs. Both options are off by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("MCP Integration") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Bundled MCP Server", systemImage: "network")
+                        .font(.callout.weight(.semibold))
+                    Text("Clippy ships a bundled MCP server (clippy-mcp) that lets external AI agents, such as Claude Desktop, read and search your clips via the Model Context Protocol.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Server path:")
+                        .font(.caption.weight(.medium))
+                    let mcpPath = (Bundle.main.bundlePath as NSString)
+                        .deletingLastPathComponent
+                        .appending("/integrations/clippy-mcp")
+                    Text(mcpPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .foregroundStyle(.secondary)
+                    Text("Add to Claude Desktop config:")
+                        .font(.caption.weight(.medium))
+                        .padding(.top, 4)
+                    Text("""
+                        {
+                          "mcpServers": {
+                            "clippy": { "command": "node", "args": ["\(mcpPath)/index.js"] }
+                          }
+                        }
+                        """)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.1),
+                                    in: RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(.vertical, 4)
+            }
+
             Section {
                 Button(testing ? "Testing..." : "Test connection") { test() }
                     .disabled(testing || !settings.aiEnabled)

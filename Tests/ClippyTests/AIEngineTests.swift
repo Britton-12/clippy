@@ -444,3 +444,63 @@ final class AIToolTruncationTests: XCTestCase {
         XCTAssertEqual(AIToolHelpers.truncate(short), short)
     }
 }
+
+// MARK: - AIToolRegistry.makeFiltered tests
+
+final class AIToolRegistryFilteredTests: XCTestCase {
+
+    /// With both toggles off, only search_clips and create_clip are registered;
+    /// script and code tools must not appear.
+    func testBothTogglesOffExcludesScriptAndCodeTools() {
+        let registry = AIToolRegistry.makeFiltered(
+            allowScripts: false,
+            allowCodeExecution: false,
+            confirmHook: { _ in true }
+        )
+        let names = Set(registry.all.map(\.name))
+        XCTAssertTrue(names.contains("search_clips"))
+        XCTAssertTrue(names.contains("create_clip"))
+        XCTAssertFalse(names.contains("run_script"),
+                       "run_script must be excluded when allowScripts is false")
+        XCTAssertFalse(names.contains("list_scripts"),
+                       "list_scripts must be excluded when allowScripts is false")
+        XCTAssertFalse(names.contains("execute_code"),
+                       "execute_code must be excluded when allowCodeExecution is false")
+    }
+
+    /// With allowScripts on, script tools appear.
+    func testAllowScriptsIncludesScriptTools() {
+        let registry = AIToolRegistry.makeFiltered(
+            allowScripts: true,
+            allowCodeExecution: false,
+            confirmHook: { _ in true }
+        )
+        let names = Set(registry.all.map(\.name))
+        XCTAssertTrue(names.contains("run_script"))
+        XCTAssertTrue(names.contains("list_scripts"))
+        XCTAssertFalse(names.contains("execute_code"))
+    }
+
+    /// With allowCodeExecution on, the code tool appears.
+    func testAllowCodeExecutionIncludesCodeTool() {
+        let registry = AIToolRegistry.makeFiltered(
+            allowScripts: false,
+            allowCodeExecution: true,
+            confirmHook: { _ in true }
+        )
+        let names = Set(registry.all.map(\.name))
+        XCTAssertTrue(names.contains("execute_code"))
+        XCTAssertFalse(names.contains("run_script"))
+    }
+
+    /// With both toggles on, all five built-in tools appear.
+    func testBothTogglesOnIncludesAllBuiltInTools() {
+        let registry = AIToolRegistry.makeFiltered(
+            allowScripts: true,
+            allowCodeExecution: true,
+            confirmHook: { _ in true }
+        )
+        let names = Set(registry.all.map(\.name))
+        XCTAssertEqual(names, ["search_clips", "create_clip", "list_scripts", "run_script", "execute_code"])
+    }
+}

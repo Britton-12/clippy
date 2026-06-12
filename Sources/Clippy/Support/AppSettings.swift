@@ -75,6 +75,8 @@ final class AppSettings: ObservableObject {
         static let aiBaseURL = "aiBaseURL"
         static let aiAzureAPIVersion = "aiAzureAPIVersion"
         static let aiAutoSuggestTitles = "aiAutoSuggestTitles"
+        static let aiAgentAllowScripts = "aiAgentAllowScripts"
+        static let aiAgentAllowCodeExecution = "aiAgentAllowCodeExecution"
         // 1Password integration
         static let onePasswordEnabled = "onePasswordEnabled"
         static let onePasswordVault = "onePasswordVault"
@@ -234,6 +236,16 @@ final class AppSettings: ObservableObject {
     @Published var aiAutoSuggestTitles: Bool {
         didSet { defaults.set(aiAutoSuggestTitles, forKey: Keys.aiAutoSuggestTitles) }
     }
+    /// When on, the AI assistant may run saved scripts via the run_script tool.
+    /// Off by default; user must explicitly opt in.
+    @Published var aiAgentAllowScripts: Bool {
+        didSet { defaults.set(aiAgentAllowScripts, forKey: Keys.aiAgentAllowScripts) }
+    }
+    /// When on, the AI assistant may execute AI-generated code via the execute_code tool.
+    /// Off by default; user must explicitly opt in.
+    @Published var aiAgentAllowCodeExecution: Bool {
+        didSet { defaults.set(aiAgentAllowCodeExecution, forKey: Keys.aiAgentAllowCodeExecution) }
+    }
 
     // MARK: - 1Password
 
@@ -373,6 +385,8 @@ final class AppSettings: ObservableObject {
             Keys.aiBaseURL: "",
             Keys.aiAzureAPIVersion: "2024-10-21",
             Keys.aiAutoSuggestTitles: false,
+            Keys.aiAgentAllowScripts: false,
+            Keys.aiAgentAllowCodeExecution: false,
             Keys.onePasswordEnabled: false,
             Keys.onePasswordVault: "Clippy",
             Keys.onePasswordAutoClearClipboard: true,
@@ -431,6 +445,8 @@ final class AppSettings: ObservableObject {
         aiBaseURL = defaults.string(forKey: Keys.aiBaseURL) ?? ""
         aiAzureAPIVersion = defaults.string(forKey: Keys.aiAzureAPIVersion) ?? "2024-10-21"
         aiAutoSuggestTitles = defaults.bool(forKey: Keys.aiAutoSuggestTitles)
+        aiAgentAllowScripts = defaults.bool(forKey: Keys.aiAgentAllowScripts)
+        aiAgentAllowCodeExecution = defaults.bool(forKey: Keys.aiAgentAllowCodeExecution)
         onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
         onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? "Clippy"
         onePasswordAutoClearClipboard = defaults.bool(forKey: Keys.onePasswordAutoClearClipboard)

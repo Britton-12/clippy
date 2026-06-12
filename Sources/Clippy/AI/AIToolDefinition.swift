@@ -295,4 +295,25 @@ extension AIToolRegistry {
         registry.register(ExecuteCodeTool(confirmHook: confirmHook))
         return registry
     }
+
+    /// Build a registry filtered by the two agent safety toggles. When a toggle
+    /// is off the corresponding tool is simply not registered, so the model never
+    /// sees it in the schema and cannot attempt to call it.
+    static func makeFiltered(
+        allowScripts: Bool,
+        allowCodeExecution: Bool,
+        confirmHook: @escaping (String) async -> Bool
+    ) -> AIToolRegistry {
+        let registry = AIToolRegistry()
+        registry.register(SearchClipsTool())
+        registry.register(CreateClipTool())
+        if allowScripts {
+            registry.register(ListScriptsTool(scriptStore: .shared))
+            registry.register(RunScriptTool(scriptStore: .shared, confirmHook: confirmHook))
+        }
+        if allowCodeExecution {
+            registry.register(ExecuteCodeTool(confirmHook: confirmHook))
+        }
+        return registry
+    }
 }
