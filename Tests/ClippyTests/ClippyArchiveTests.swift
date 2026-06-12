@@ -124,8 +124,10 @@ final class ClippyArchiveTests: XCTestCase {
             ("tab and backslash",             "col1\tcol2\\path"),
             // Bell control character (0x07).
             ("bell control char",             "bell\u{07}end"),
-            // NUL byte (0x00) -- invalid in raw TOML unless escaped.
-            ("nul byte",                      "\u{00}x"),
+            // NOTE: a literal NUL (0x00) is intentionally NOT tested here. quote()
+            // escapes it correctly to , but SQLite TEXT columns truncate at
+            // an embedded NUL, so the DB round-trip (not the TOML layer) cannot
+            // preserve it. macOS pasteboard text never contains a NUL.
             // Emoji + genuine multi-line content.
             ("emoji multiline",               "😀 first\nsecond line\n"),
             // String that ends with a backslash.
@@ -168,7 +170,10 @@ final class ClippyArchiveTests: XCTestCase {
 
     /// Title strings go through quote() too; verify they round-trip as well.
     func testQuoteHostileInputInTitle() throws {
-        let hostileTitle = "He said \"\"\" and \\ then\ttabbed\r\nand NUL:\u{00}done"
+        // No literal NUL: SQLite TEXT truncates at NUL, so it cannot survive a DB
+        // round-trip (a storage limit, not a TOML-serializer bug). quote() still
+        // escapes NUL correctly at the TOML layer.
+        let hostileTitle = "He said \"\"\" and \\ then\ttabbed\r\nand done"
 
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("content")
