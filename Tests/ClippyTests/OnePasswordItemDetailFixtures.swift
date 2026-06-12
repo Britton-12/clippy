@@ -93,4 +93,49 @@ enum OPFixtures {
       ]
     }
     """
+
+    /// Field whose "label" key is entirely absent from the JSON object.
+    /// Parser must fall back to the field's "id" as the display label.
+    static let fieldLabelAbsent = """
+    {
+      "id": "nolabel001",
+      "title": "No Label Item",
+      "category": "LOGIN",
+      "fields": [
+        {"id":"my_field_id","type":"STRING","value":"some value"}
+      ]
+    }
+    """
+
+    /// Section referenced by id in a field's section object but with no "label"
+    /// key anywhere — not in the top-level sections array, not inline on the field.
+    /// Parser must fall back to the section id as the display label.
+    static let sectionIdOnlyNoLabel = """
+    {
+      "id": "noseclabel001",
+      "title": "Section ID Only",
+      "category": "LOGIN",
+      "sections": [
+        {"id":"bare_section_id"}
+      ],
+      "fields": [
+        {"id":"f1","label":"field one","type":"STRING","value":"v1",
+         "section":{"id":"bare_section_id"}}
+      ]
+    }
+    """
+
+    /// Field with a Unicode label containing non-ASCII characters and emoji.
+    /// Parser must preserve the label exactly as-is.
+    static let unicodeFieldLabel = """
+    {
+      "id": "unicode001",
+      "title": "Unicode Item",
+      "category": "LOGIN",
+      "fields": [
+        {"id":"u1","label":"Passwörter \u{1F511}","type":"CONCEALED","value":"geheim"},
+        {"id":"u2","label":"汉字キー","type":"STRING","value":"値"}
+      ]
+    }
+    """
 }

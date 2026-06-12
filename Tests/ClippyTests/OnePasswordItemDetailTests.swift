@@ -210,6 +210,40 @@ final class OnePasswordItemDetailTests: XCTestCase {
         XCTAssertEqual(items.first?.id, "a1")
     }
 
+    // MARK: - parseItemDetail: field label absent (falls back to id)
+
+    func testFieldLabelAbsent_fallsBackToFieldID() {
+        let detail = parsed(OPFixtures.fieldLabelAbsent)
+        let field = detail.fields.first { $0.id == "my_field_id" }
+        XCTAssertNotNil(field)
+        // When "label" key is absent, the field id is used as the display label.
+        XCTAssertEqual(field?.label, "my_field_id")
+        XCTAssertEqual(field?.value, "some value")
+    }
+
+    // MARK: - parseItemDetail: section with id but no label anywhere
+
+    func testSectionIdOnly_fallsBackToSectionID() {
+        let detail = parsed(OPFixtures.sectionIdOnlyNoLabel)
+        let field = detail.fields.first { $0.id == "f1" }
+        XCTAssertNotNil(field)
+        // Section has no "label" in top-level array or inline; id used as label.
+        XCTAssertEqual(field?.section?.id, "bare_section_id")
+        XCTAssertEqual(field?.section?.label, "bare_section_id")
+    }
+
+    // MARK: - parseItemDetail: unicode field labels
+
+    func testUnicodeLabels_preservedExactly() {
+        let detail = parsed(OPFixtures.unicodeFieldLabel)
+        let concealed = detail.fields.first { $0.id == "u1" }
+        let plain     = detail.fields.first { $0.id == "u2" }
+        XCTAssertEqual(concealed?.label, "Passwörter \u{1F511}")
+        XCTAssertEqual(plain?.label, "\u{6C49}\u{5B57}\u{30AD}\u{30FC}")
+        XCTAssertEqual(concealed?.value, "geheim")
+        XCTAssertEqual(plain?.value, "\u{5024}")
+    }
+
     // MARK: - Helpers
 
     private func parsed(_ json: String) -> OPItemDetail {

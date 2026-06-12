@@ -19,6 +19,10 @@ struct ClipListView: View {
     @State private var categoryCreationClip: Clip?
     /// The ID of the clip whose title is currently being edited inline.
     @State private var renamingClipID: Int64?
+    /// Feedback banner shown after an OCR attempt (success or failure message).
+    @State private var ocrStatusMessage: String?
+    /// ID of the clip currently being processed by OCR so the card can show a spinner.
+    @State private var ocrProcessingClipID: Int64?
     @FocusState private var searchFocused: Bool
 
     /// Active theme token table; every color below reads from this.
@@ -76,21 +80,40 @@ struct ClipListView: View {
     // MARK: - Main pane
 
     private var mainPane: some View {
-        ZStack {
-            if selection == .history {
-                paneContent
-                    .transition(paneTransition(edge: .leading))
-            } else {
-                paneContent
-                    .id(selection)
-                    .transition(paneTransition(edge: .trailing))
+        ZStack(alignment: .bottom) {
+            ZStack {
+                if selection == .history {
+                    paneContent
+                        .transition(paneTransition(edge: .leading))
+                } else {
+                    paneContent
+                        .id(selection)
+                        .transition(paneTransition(edge: .trailing))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Background behind the scrolling cards; tracks the transparency slider.
+            .background(tokens.scrollBackground.opacity(settings.panelOpacity))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
+            .clipped()
+
+            // MARK: OCR status banner
+            if let message = ocrStatusMessage {
+                Text(message)
+                    .font(PanelTypography.metadata(settings))
+                    .foregroundStyle(tokens.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(tokens.cardBorder, lineWidth: 1)
+                    )
+                    .padding(.bottom, 10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Background behind the scrolling cards; tracks the transparency slider.
-        .background(tokens.scrollBackground.opacity(settings.panelOpacity))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
-        .clipped()
+        .animation(reduceMotion ? nil : .spring(duration: 0.3), value: ocrStatusMessage)
     }
 
     private func paneTransition(edge: Edge) -> AnyTransition {
@@ -285,6 +308,22 @@ struct ClipListView: View {
                 Button("Paste as Plain Text") { onPaste(clip, true) }
                 Divider()
                 Button("Edit...") { onEdit(clip) }
+            }
+            if clip.contentKind == .image {
+                Divider()
+                Button {
+                    ocrProcessingClipID = clip.id
+                    store.extractText(from: clip) { message in
+                        ocrProcessingClipID = nil
+                        ocrStatusMessage = message
+                        // Auto-dismiss after 3 seconds.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if ocrStatusMessage == message { ocrStatusMessage = nil }
+                        }
+                    }
+                } label: {
+                    Label("Extract Text", systemImage: "text.viewfinder")
+                }
             }
             // "Rename..." works for all clip kinds, not just text.
             Button("Rename...") { renamingClipID = clip.id }

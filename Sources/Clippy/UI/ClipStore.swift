@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import GRDB
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// View model for the panel: live observation of clips, categories, and
 /// membership; FTS5 search when a query is typed. "Pinned" is derived:
@@ -173,6 +176,41 @@ final class ClipStore: ObservableObject {
         } catch {
             NSLog("Clippy: failed to save script output: \(error)")
             return false
+        }
+    }
+
+    /// Run OCR on an image clip, copy the result to the clipboard, and save it
+    /// as a new text clip. The `completion` block is always called on the main
+    /// queue and carries a human-readable outcome message for display.
+    func extractText(from clip: Clip, completion: @escaping (String) -> Void) {
+        guard clip.contentKind == .image,
+              let filename = clip.mediaFilename else {
+            completion("No image data for this clip.")
+            return
+        }
+        let imageURL = database.media.url(for: filename)
+        OCRService.recognizeText(in: imageURL) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let text) where text.isEmpty:
+                completion("No text found in image.")
+            case .success(let text):
+                #if canImport(AppKit)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                #endif
+                do {
+                    try self.database.insertTextClip(text, sourceAppName: "Clippy OCR")
+                    completion("Text extracted and copied to clipboard.")
+                } catch {
+                    NSLog("Clippy: OCR insert failed: \(error)")
+                    // Clipboard copy succeeded even if the save did not.
+                    completion("Text copied to clipboard (save failed).")
+                }
+            case .failure(let error):
+                NSLog("Clippy: OCR recognition failed: \(error)")
+                completion("Text extraction failed: \(error.localizedDescription)")
+            }
         }
     }
 

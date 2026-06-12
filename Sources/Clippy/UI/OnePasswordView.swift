@@ -343,7 +343,8 @@ private struct FieldRow: View {
             }
         }
         .controlSize(.small)
-        .disabled(copying || (field.value == nil && !field.type.isOTP && !field.type.isConcealed))
+        .disabled(copying || (field.value == nil && !field.type.isOTP))
+        .help(field.value == nil && field.type.isConcealed ? "This field has no value stored in 1Password." : "")
     }
 
     private func performCopy() {
