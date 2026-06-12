@@ -9,6 +9,8 @@ struct AIProposal: Equatable {
         case category
         case summary
         case newClip
+        /// Result should be written to NSPasteboard; source clip is not modified.
+        case copyToClipboard
     }
     let kind: Kind
     let label: String
@@ -98,6 +100,27 @@ final class AIService {
             AIMessage(role: .user, content: "Context:\n\(Self.clamp(context, 3000))\n\nRequest: \(request)"),
         ], options: AICompletionOptions(temperature: 0.6, maxTokens: 1024))
         return AIProposal(kind: .newClip, label: "New clip", original: nil, proposed: Self.trim(out))
+    }
+
+    // MARK: - Custom action runner
+
+    /// Execute a user-defined `AIAction` against the given clip text.
+    /// The action's `promptTemplate` is rendered with `{clip}` and `{instruction}`
+    /// before being sent as the user message. Returns an `AIProposal` shaped by
+    /// the action's `outputDisposition`.
+    func run(action: AIAction, on clipText: String, instruction: String = "") async throws -> AIProposal {
+        let userPrompt = action.buildPrompt(clip: Self.clamp(clipText, 6000), instruction: instruction)
+        let out = try await provider.complete([
+            AIMessage(role: .user, content: userPrompt),
+        ], options: AICompletionOptions(temperature: action.temperature, maxTokens: action.maxTokens))
+        let trimmed = Self.trim(out)
+        let kind: AIProposal.Kind
+        switch action.outputDisposition {
+        case .newClip:          kind = .newClip
+        case .copyToClipboard:  kind = .copyToClipboard
+        case .proposeEdit:      kind = .rewrite
+        }
+        return AIProposal(kind: kind, label: action.name, original: clipText, proposed: trimmed)
     }
 
     // MARK: - Response shaping (pure, tested)

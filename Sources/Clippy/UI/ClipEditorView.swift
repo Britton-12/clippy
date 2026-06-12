@@ -53,9 +53,10 @@ private struct TextClipEditor: View {
             PlainTextEditor(text: $text)
             Divider()
             HStack {
-                Text("\(text.count) characters · \(wordCount) words · \(lineCount) lines")
+                Text("\(text.unicodeScalars.count) Unicode scalars · \(wordCount) words · \(lineCount) lines")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(text.unicodeScalars.count) Unicode scalars, \(wordCount) words, \(lineCount) lines")
                 Spacer()
                 Button("Cancel", role: .cancel) { onClose() }
                     .keyboardShortcut(.cancelAction)
@@ -100,6 +101,11 @@ private struct TextClipEditor: View {
         case .title: title = proposal.proposed
         case .rewrite, .summary, .newClip: text = proposal.proposed
         case .category: break
+        case .copyToClipboard:
+            // The ClipListView handler already wrote to NSPasteboard; nothing
+            // to do in the editor. The case must be handled to keep the switch
+            // exhaustive as Kind grows.
+            break
         }
     }
 
@@ -130,6 +136,7 @@ private struct ImageClipEditor: View {
     let store: ClipStore
     let onClose: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
     @State private var working: NSImage?
     @State private var title: String
     @State private var cropping = false
@@ -137,6 +144,8 @@ private struct ImageClipEditor: View {
     @State private var dragCurrent: CGPoint?
     @State private var saveError: String?
     @State private var canvasSize: CGSize = .zero
+
+    private var tokens: ThemeTokens { settings.theme }
 
     init(clip: Clip, store: ClipStore, onClose: @escaping () -> Void) {
         self.clip = clip
@@ -215,7 +224,7 @@ private struct ImageClipEditor: View {
             }
         }
         .padding(8)
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(tokens.scrollBackground)
     }
 
     @ViewBuilder

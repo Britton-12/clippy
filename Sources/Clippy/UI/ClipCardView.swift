@@ -338,7 +338,7 @@ struct ClipCardView: View {
                 }
             }
             if let width = clip.pixelWidth, let height = clip.pixelHeight {
-                Text("\(width)x\(height) PNG")
+                Text("\(width)\u{00D7}\(height) PNG")
                     .font(PanelTypography.micro(settings))
                     .foregroundStyle(tokens.textSecondary)
                     .monospacedDigit()
@@ -355,10 +355,12 @@ struct ClipCardView: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .strokeBorder(tokens.cardBorder, lineWidth: 1)
                 )
-            Text("Color value")
+            Text(clip.contentText)
                 .font(PanelTypography.micro(settings))
                 .foregroundStyle(tokens.textSecondary)
+                .lineLimit(1)
         }
+        .accessibilityLabel("Color \(clip.contentText)")
     }
 
     /// Tint fraction as a 0-1 Double from the 0-20 integer setting.

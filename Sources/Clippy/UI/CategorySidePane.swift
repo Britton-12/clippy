@@ -30,6 +30,10 @@ struct CategorySidePane: View {
                     if settings.onePasswordEnabled {
                         onePasswordRow
                     }
+                    scriptsRow
+                    if settings.aiEnabled {
+                        assistantRow
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -122,7 +126,7 @@ struct CategorySidePane: View {
     private var onePasswordRow: some View {
         sidePaneRow(
             isSelected: selection == .onePassword,
-            tint: Color(nsColor: .systemBlue),
+            tint: tokens.accent,
             icon: { Image(systemName: "key.fill").font(.system(size: 12, weight: .semibold)) },
             title: "1Password",
             count: nil,
@@ -131,6 +135,34 @@ struct CategorySidePane: View {
             selection = selection == .onePassword ? .history : .onePassword
         }
         .accessibilityLabel("1Password secrets")
+    }
+
+    private var scriptsRow: some View {
+        sidePaneRow(
+            isSelected: selection == .scripts,
+            tint: Color(nsColor: .systemGreen),
+            icon: { Image(systemName: "terminal.fill").font(.system(size: 12, weight: .semibold)) },
+            title: "Scripts",
+            count: nil,
+            help: "Run saved scripts"
+        ) {
+            selection = selection == .scripts ? .history : .scripts
+        }
+        .accessibilityLabel("Scripts")
+    }
+
+    private var assistantRow: some View {
+        sidePaneRow(
+            isSelected: selection == .assistant,
+            tint: Color(nsColor: .systemPurple),
+            icon: { Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)) },
+            title: "Assistant",
+            count: nil,
+            help: "AI Assistant chat"
+        ) {
+            selection = selection == .assistant ? .history : .assistant
+        }
+        .accessibilityLabel("AI Assistant")
     }
 
     private var newCategoryRow: some View {

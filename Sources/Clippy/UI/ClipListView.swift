@@ -19,7 +19,15 @@ struct ClipListView: View {
     @State private var categoryCreationClip: Clip?
     /// The ID of the clip whose title is currently being edited inline.
     @State private var renamingClipID: Int64?
+    /// Feedback banner shown after an OCR attempt (success or failure message).
+    @State private var ocrStatusMessage: String?
+    /// ID of the clip currently being processed by OCR so the card can show a spinner.
+    @State private var ocrProcessingClipID: Int64?
     @FocusState private var searchFocused: Bool
+    /// AI runner used by the context-menu AI submenu.
+    @StateObject private var aiRunner = AIActionRunner()
+    /// The clip the AI action is being run against (needed so onApply can write back).
+    @State private var aiTargetClip: Clip?
 
     /// Active theme token table; every color below reads from this.
     private var tokens: ThemeTokens { settings.theme }
@@ -35,6 +43,10 @@ struct ClipListView: View {
         case .category(let categoryID):
             return store.clips.filter { store.categoryIDs(for: $0).contains(categoryID) }
         case .onePassword:
+            return []
+        case .scripts:
+            return []
+        case .assistant:
             return []
         }
     }
@@ -64,6 +76,17 @@ struct ClipListView: View {
         .tint(tokens.accent)
         .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
         .onChange(of: selection) { _, _ in selectedIndex = 0 }
+        // AI action sheet — shown when a context-menu AI action produces a proposal.
+        .sheet(isPresented: Binding(
+            get: { aiRunner.isPresenting },
+            set: { if !$0 { aiRunner.reset() } }
+        )) {
+            AIActionSheet(runner: aiRunner) { proposal in
+                guard let clip = aiTargetClip else { aiRunner.reset(); return }
+                handleAIProposal(proposal, for: clip)
+                aiRunner.reset()
+            }
+        }
     }
 
     /// Side pane takes a quarter of the panel but never less than 150pt.
@@ -74,21 +97,40 @@ struct ClipListView: View {
     // MARK: - Main pane
 
     private var mainPane: some View {
-        ZStack {
-            if selection == .history {
-                paneContent
-                    .transition(paneTransition(edge: .leading))
-            } else {
-                paneContent
-                    .id(selection)
-                    .transition(paneTransition(edge: .trailing))
+        ZStack(alignment: .bottom) {
+            ZStack {
+                if selection == .history {
+                    paneContent
+                        .transition(paneTransition(edge: .leading))
+                } else {
+                    paneContent
+                        .id(selection)
+                        .transition(paneTransition(edge: .trailing))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Background behind the scrolling cards; tracks the transparency slider.
+            .background(tokens.scrollBackground.opacity(settings.panelOpacity))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
+            .clipped()
+
+            // MARK: OCR status banner
+            if let message = ocrStatusMessage {
+                Text(message)
+                    .font(PanelTypography.metadata(settings))
+                    .foregroundStyle(tokens.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(tokens.cardBorder, lineWidth: 1)
+                    )
+                    .padding(.bottom, 10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Background behind the scrolling cards; tracks the transparency slider.
-        .background(tokens.scrollBackground.opacity(settings.panelOpacity))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: selection)
-        .clipped()
+        .animation(reduceMotion ? nil : .spring(duration: 0.3), value: ocrStatusMessage)
     }
 
     private func paneTransition(edge: Edge) -> AnyTransition {
@@ -97,8 +139,12 @@ struct ClipListView: View {
 
     @ViewBuilder
     private var paneContent: some View {
-        if selection == .onePassword {
+        if selection == .scripts {
+            ScriptsPanelView(store: store, onOpenSettings: onOpenSettings)
+        } else if selection == .onePassword {
             OnePasswordView()
+        } else if selection == .assistant {
+            AIAssistantPanelView(store: store, onOpenSettings: onOpenSettings)
         } else if visibleClips.isEmpty {
             emptyState
         } else {
@@ -282,9 +328,28 @@ struct ClipListView: View {
                 Divider()
                 Button("Edit...") { onEdit(clip) }
             }
+            if clip.contentKind == .image {
+                Divider()
+                Button {
+                    ocrProcessingClipID = clip.id
+                    store.extractText(from: clip) { message in
+                        ocrProcessingClipID = nil
+                        ocrStatusMessage = message
+                        // Auto-dismiss after 3 seconds.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if ocrStatusMessage == message { ocrStatusMessage = nil }
+                        }
+                    }
+                } label: {
+                    Label("Extract Text", systemImage: "text.viewfinder")
+                }
+            }
             // "Rename..." works for all clip kinds, not just text.
             Button("Rename...") { renamingClipID = clip.id }
             Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
+            if clip.contentKind == .text {
+                aiActionsMenu(for: clip)
+            }
             categoriesMenu(for: clip)
             Divider()
             Button("Delete", role: .destructive) { store.delete(clip) }
@@ -302,6 +367,74 @@ struct ClipListView: View {
                    let clipID = clip.id {
                     store.addClip(id: clipID, toCategory: categoryID)
                 }
+            }
+        }
+    }
+
+    // MARK: - AI actions context submenu
+
+    @ViewBuilder
+    private func aiActionsMenu(for clip: Clip) -> some View {
+        let actions = AIActionStore.shared.actions
+        if !settings.aiEnabled {
+            Menu {
+                Text("Enable AI in Settings to use AI actions.")
+            } label: {
+                Label("AI", systemImage: "sparkles")
+            }
+        } else {
+            Menu {
+                ForEach(actions) { action in
+                    Button {
+                        runAIAction(action, on: clip)
+                    } label: {
+                        Label(action.name, systemImage: action.symbolName)
+                    }
+                }
+                if actions.isEmpty {
+                    Text("No actions configured.")
+                }
+                Divider()
+                Button("Open AI Assistant") { selection = .assistant }
+            } label: {
+                Label("AI", systemImage: "sparkles")
+            }
+        }
+    }
+
+    private func runAIAction(_ action: AIAction, on clip: Clip) {
+        aiTargetClip = clip
+        let clipText = clip.contentText
+        aiRunner.run { service in
+            try await service.run(action: action, on: clipText)
+        }
+    }
+
+    /// Apply an approved AI proposal to its source clip.
+    private func handleAIProposal(_ proposal: AIProposal, for clip: Clip) {
+        let text = proposal.proposed
+        switch proposal.kind {
+        case .rewrite, .title, .category, .summary:
+            // proposeEdit disposition: overwrite the clip text in-place.
+            store.updateText(of: clip, to: text)
+        case .newClip:
+            // newClip disposition: insert as a fresh history entry.
+            store.saveScriptOutput(text)
+        case .copyToClipboard:
+            // copyToClipboard disposition: write result to NSPasteboard without
+            // touching the source clip, then show a brief status banner.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            showStatusBanner("Copied to clipboard")
+        }
+    }
+
+    /// Show `message` in the OCR-style status banner for ~2 seconds.
+    private func showStatusBanner(_ message: String) {
+        ocrStatusMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if ocrStatusMessage == message {
+                ocrStatusMessage = nil
             }
         }
     }
@@ -347,6 +480,8 @@ struct ClipListView: View {
         case .history: return "clipboard"
         case .category: return "tray"
         case .onePassword: return "key.fill"
+        // .scripts and .assistant route to their own views; unreachable here.
+        case .scripts, .assistant: return "tray"
         }
     }
 
@@ -361,6 +496,9 @@ struct ClipListView: View {
             return "No clips in this category yet. Right-click a clip and choose Categories, or drag a card onto the category."
         case .onePassword:
             return "No secrets shared to Clippy yet."
+        // .scripts and .assistant route to their own views; unreachable here.
+        case .scripts, .assistant:
+            return ""
         }
     }
 
@@ -369,6 +507,8 @@ struct ClipListView: View {
             keyHint("\u{21A9}", settings.pastePlainTextByDefault ? "paste plain" : "paste")
             keyHint("\u{21E7}\u{21A9}", settings.pastePlainTextByDefault ? "formatted" : "plain")
             keyHint("\u{2318}P", "pin")
+            keyHint("\u{2318}E", "edit")
+            keyHint("\u{2318}\u{232B}", "delete")
             keyHint("\u{238B}", "close")
             Spacer()
         }
@@ -380,7 +520,10 @@ struct ClipListView: View {
     private func keyHint(_ key: String, _ action: String) -> some View {
         HStack(spacing: 5) {
             Text(key)
-                .font(PanelTypography.metadata(settings).weight(.semibold))
+                // Use an explicit system font so key glyphs always render at the
+                // correct weight, regardless of any custom font family chosen in
+                // user appearance settings.
+                .font(.system(size: 11, weight: .semibold, design: .default))
                 .foregroundStyle(tokens.textPrimary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)

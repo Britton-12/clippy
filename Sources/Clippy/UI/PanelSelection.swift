@@ -1,9 +1,12 @@
 import Foundation
 
-/// What the main pane is showing: the chronological history, one category, or
-/// the virtual 1Password vault (secrets shared to Clippy).
+/// What the main pane is showing: the chronological history, one category,
+/// the virtual 1Password vault (secrets shared to Clippy), the Scripts panel,
+/// or the AI Assistant chat pane.
 enum PanelSelection: Hashable {
     case history
     case category(Int64)
     case onePassword
+    case scripts
+    case assistant
 }

@@ -75,9 +75,13 @@ final class AppSettings: ObservableObject {
         static let aiBaseURL = "aiBaseURL"
         static let aiAzureAPIVersion = "aiAzureAPIVersion"
         static let aiAutoSuggestTitles = "aiAutoSuggestTitles"
+        static let aiAgentAllowScripts = "aiAgentAllowScripts"
+        static let aiAgentAllowCodeExecution = "aiAgentAllowCodeExecution"
         // 1Password integration
         static let onePasswordEnabled = "onePasswordEnabled"
         static let onePasswordVault = "onePasswordVault"
+        static let onePasswordAutoClearClipboard = "onePasswordAutoClearClipboard"
+        static let onePasswordAutoClearDelaySecs = "onePasswordAutoClearDelaySecs"
         // iCloud sync
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
     }
@@ -232,6 +236,16 @@ final class AppSettings: ObservableObject {
     @Published var aiAutoSuggestTitles: Bool {
         didSet { defaults.set(aiAutoSuggestTitles, forKey: Keys.aiAutoSuggestTitles) }
     }
+    /// When on, the AI assistant may run saved scripts via the run_script tool.
+    /// Off by default; user must explicitly opt in.
+    @Published var aiAgentAllowScripts: Bool {
+        didSet { defaults.set(aiAgentAllowScripts, forKey: Keys.aiAgentAllowScripts) }
+    }
+    /// When on, the AI assistant may execute AI-generated code via the execute_code tool.
+    /// Off by default; user must explicitly opt in.
+    @Published var aiAgentAllowCodeExecution: Bool {
+        didSet { defaults.set(aiAgentAllowCodeExecution, forKey: Keys.aiAgentAllowCodeExecution) }
+    }
 
     // MARK: - 1Password
 
@@ -243,6 +257,15 @@ final class AppSettings: ObservableObject {
     /// The vault Clippy reads from and creates secrets in.
     @Published var onePasswordVault: String {
         didSet { defaults.set(onePasswordVault, forKey: Keys.onePasswordVault) }
+    }
+    /// When true, the clipboard is cleared N seconds after copying a 1Password
+    /// secret (only if the pasteboard still holds that exact write).
+    @Published var onePasswordAutoClearClipboard: Bool {
+        didSet { defaults.set(onePasswordAutoClearClipboard, forKey: Keys.onePasswordAutoClearClipboard) }
+    }
+    /// Seconds to wait before auto-clearing a copied 1Password secret. Default 90.
+    @Published var onePasswordAutoClearDelaySecs: Int {
+        didSet { defaults.set(onePasswordAutoClearDelaySecs, forKey: Keys.onePasswordAutoClearDelaySecs) }
     }
 
     // MARK: - iCloud sync
@@ -362,8 +385,12 @@ final class AppSettings: ObservableObject {
             Keys.aiBaseURL: "",
             Keys.aiAzureAPIVersion: "2024-10-21",
             Keys.aiAutoSuggestTitles: false,
+            Keys.aiAgentAllowScripts: false,
+            Keys.aiAgentAllowCodeExecution: false,
             Keys.onePasswordEnabled: false,
             Keys.onePasswordVault: "Clippy",
+            Keys.onePasswordAutoClearClipboard: true,
+            Keys.onePasswordAutoClearDelaySecs: 90,
             Keys.iCloudSyncEnabled: false,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
@@ -418,8 +445,15 @@ final class AppSettings: ObservableObject {
         aiBaseURL = defaults.string(forKey: Keys.aiBaseURL) ?? ""
         aiAzureAPIVersion = defaults.string(forKey: Keys.aiAzureAPIVersion) ?? "2024-10-21"
         aiAutoSuggestTitles = defaults.bool(forKey: Keys.aiAutoSuggestTitles)
+        aiAgentAllowScripts = defaults.bool(forKey: Keys.aiAgentAllowScripts)
+        aiAgentAllowCodeExecution = defaults.bool(forKey: Keys.aiAgentAllowCodeExecution)
         onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
         onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? "Clippy"
+        onePasswordAutoClearClipboard = defaults.bool(forKey: Keys.onePasswordAutoClearClipboard)
+        onePasswordAutoClearDelaySecs = {
+            let stored = defaults.integer(forKey: Keys.onePasswordAutoClearDelaySecs)
+            return stored >= 10 && stored <= 600 ? stored : 90
+        }()
         iCloudSyncEnabled = defaults.bool(forKey: Keys.iCloudSyncEnabled)
     }
 

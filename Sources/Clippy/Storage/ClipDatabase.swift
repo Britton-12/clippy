@@ -255,6 +255,31 @@ final class ClipDatabase {
         media.delete(filenames: oldFilenames.filter { !keep.contains($0) })
     }
 
+    /// Insert a plain-text clip from a non-capture source (script output, OCR,
+    /// etc.). Unlike saveCapturedClip, this always inserts a fresh row — no
+    /// deduplication. Returns the row's assigned id.
+    /// - Parameters:
+    ///   - text: The clip's text content.
+    ///   - sourceAppName: Label shown in the card header. Defaults to "Clippy Scripts"
+    ///     for backward compatibility with callers that do not supply one.
+    @discardableResult
+    func insertTextClip(_ text: String, sourceAppName: String = "Clippy Scripts") throws -> Int64 {
+        var clip = Clip(
+            id: nil,
+            contentText: text,
+            contentRTF: nil,
+            contentHTML: nil,
+            typeIdentifier: "public.utf8-plain-text",
+            sourceAppBundleID: nil,
+            sourceAppName: sourceAppName,
+            createdAt: Date()
+        )
+        try dbQueue.write { db in
+            try clip.insert(db)
+        }
+        return clip.id ?? 0
+    }
+
     func deleteClip(id: Int64) throws {
         let filenames: [String] = try dbQueue.write { db in
             let clip = try Clip.fetchOne(db, key: id)
