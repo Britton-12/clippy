@@ -117,12 +117,31 @@ final class ClipboardMonitor {
             createdAt: Date()
         )
         do {
-            try database.saveCapturedClip(&clip)
+            try database.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
             // Sound fires only after a confirmed save; duplicates or DB errors
             // get no feedback. NSSound.play() is async and never blocks here.
             playCaptureSound()
+            maybeAutoSuggestTitle(forText: text)
         } catch {
             NSLog("Clippy: failed to save clip: \(error)")
+        }
+    }
+
+    /// The one auto-applied agentic action: when enabled, give a freshly captured
+    /// text clip an AI-suggested title. Opt-in, detached, and best-effort, so it
+    /// never blocks or breaks capture; the title is still user-editable.
+    private func maybeAutoSuggestTitle(forText text: String) {
+        let settings = AppSettings.shared
+        guard settings.aiEnabled, settings.aiAutoSuggestTitles else { return }
+        guard case .success(let service) = AIService.fromSettings() else { return }
+        let database = self.database
+        Task.detached {
+            guard let proposal = try? await service.suggestTitle(forText: text),
+                  !proposal.proposed.isEmpty,
+                  let id = (try? database.allClips())?
+                    .first(where: { $0.contentText == text && $0.userTitle == nil })?.id
+            else { return }
+            try? database.updateClipTitle(id: id, userTitle: proposal.proposed)
         }
     }
 
@@ -154,7 +173,7 @@ final class ClipboardMonitor {
                 pixelHeight: stored.pixelHeight,
                 byteSize: stored.byteSize
             )
-            try database.saveCapturedImageClip(&clip)
+            try database.saveCapturedImageClip(&clip, cap: AppSettings.shared.maxHistoryItems)
             playCaptureSound()
         } catch {
             NSLog("Clippy: failed to save image clip: \(error)")
@@ -177,7 +196,7 @@ final class ClipboardMonitor {
         guard let tiff = pasteboard.data(forType: .tiff) else { return nil }
         // TIFF is rarely more than ~4x the eventual PNG; skip decoding clearly-over-cap data.
         guard tiff.count <= AppSettings.shared.maxImageSizeMB * 4_194_304 else { return nil }
-        guard let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+        guard let image = NSImage(data: tiff) else { return nil }
+        return MediaStore.pngData(from: image)
     }
 }

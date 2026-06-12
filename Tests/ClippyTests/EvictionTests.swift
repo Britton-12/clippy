@@ -24,9 +24,9 @@ final class EvictionTests: XCTestCase {
     func testDeleteUnclassifiedKeepsCategorized() throws {
         let db = try makeTestDatabase(self)
         var keep = makeTextClip("keep")
-        try db.saveCapturedClip(&keep)
+        try db.saveCapturedClip(&keep, cap: AppSettings.shared.maxHistoryItems)
         var drop = makeTextClip("drop")
-        try db.saveCapturedClip(&drop)
+        try db.saveCapturedClip(&drop, cap: AppSettings.shared.maxHistoryItems)
         let keepID = try XCTUnwrap(db.allClips().first(where: { $0.contentText == "keep" })?.id)
         try db.toggleStarterMembership(clipID: keepID)
 

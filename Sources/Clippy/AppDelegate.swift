@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var pauseMenuItem: NSMenuItem!
+    private let scriptsMenu = NSMenu()
 
     // Sparkle needs a packaged .app whose Info.plist carries SUFeedURL; when
     // running unbundled (swift run, smoke tests) leave the updater unstarted
@@ -34,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipDatabase.shared.media.sweepOrphans(referencedFilenames: referenced)
         }
 
+        // Kick off an iCloud sync if the user has enabled it (safe no-op otherwise).
+        CloudSyncEngine.shared.startIfEnabled()
+
         HotKeyCenter.shared.handler = { [weak self] in
             self?.panelController.toggle()
         }
@@ -47,10 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController.onEdit = { [weak self] clip in
             guard let self else { return }
             // Panel stays open while the editor is visible; only item-click,
-            // hotkey toggle, and Escape are valid close triggers.
-            self.editorController.open(clip: clip) { newText in
-                self.store.updateText(of: clip, to: newText)
-            }
+            // hotkey toggle, and Escape are valid close triggers. The editor now
+            // saves directly through the store (text edits, image edits, title).
+            self.editorController.open(clip: clip, store: self.store)
         }
         panelController.onOpenSettings = { [weak self] in
             self?.openSettings()
@@ -123,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clearItem.target = self
         menu.addItem(clearItem)
 
+        // Stored scripts, runnable straight from the menu bar. The submenu is
+        // rebuilt each time it opens (scriptsMenu is its own delegate's target).
+        let scriptsItem = NSMenuItem(title: "Run Script", action: nil, keyEquivalent: "")
+        scriptsMenu.delegate = self
+        scriptsItem.submenu = scriptsMenu
+        menu.addItem(scriptsItem)
+
         menu.addItem(.separator())
 
         let updateItem = NSMenuItem(
@@ -181,6 +191,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             try? database.deleteUnclassifiedClips()
+        }
+    }
+
+    // MARK: - Scripts
+
+    @objc private func runScriptFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let script = ScriptStore.shared.script(id: id) else { return }
+        let input = script.feedsClipboard ? NSPasteboard.general.string(forType: .string) : nil
+        Task { @MainActor in
+            let result = await ScriptRunner.run(script, input: input)
+            self.presentScriptResult(script, result)
+        }
+    }
+
+    @MainActor
+    private func presentScriptResult(_ script: Script, _ result: ScriptResult) {
+        // Auto-offering output as a clip: just place it on the pasteboard, which
+        // the monitor captures into history like any other copy.
+        if script.outputToClipboard, result.succeeded, !result.stdout.isEmpty {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(result.stdout, forType: .string)
+        }
+        let alert = NSAlert()
+        alert.messageText = result.timedOut
+            ? "\(script.name) timed out"
+            : "\(script.name) finished (exit \(result.exitCode))"
+        let body = [result.stdout, result.stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n--- stderr ---\n")
+        alert.informativeText = String(body.prefix(1500)).isEmpty ? "No output." : String(body.prefix(1500))
+        alert.alertStyle = result.succeeded ? .informational : .warning
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === scriptsMenu else { return }
+        menu.removeAllItems()
+        let scripts = ScriptStore.shared.scripts
+        if scripts.isEmpty {
+            let empty = NSMenuItem(title: "No scripts yet", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            let manage = NSMenuItem(title: "Manage in Settings...", action: #selector(openSettings), keyEquivalent: "")
+            manage.target = self
+            menu.addItem(manage)
+            return
+        }
+        for script in scripts {
+            let item = NSMenuItem(title: script.name.isEmpty ? "Untitled" : script.name,
+                                  action: #selector(runScriptFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = script.id
+            menu.addItem(item)
         }
     }
 }

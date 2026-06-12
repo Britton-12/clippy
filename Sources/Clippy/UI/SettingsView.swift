@@ -14,6 +14,10 @@ struct SettingsView: View {
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
             CaptureSettingsTab()
                 .tabItem { Label("Capture", systemImage: "doc.on.clipboard") }
+            AISettingsTab()
+                .tabItem { Label("AI", systemImage: "sparkles") }
+            ScriptsView()
+                .tabItem { Label("Scripts", systemImage: "terminal") }
             IntegrationsSettingsTab()
                 .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }
@@ -473,7 +477,126 @@ private struct CaptureSettingsTab: View {
 
 // MARK: - Integrations
 
+private struct AISettingsTab: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var apiKey = ""
+    @State private var keyStatus = ""
+    @State private var testResult: String?
+    @State private var testing = false
+
+    var body: some View {
+        Form {
+            Section("AI features") {
+                Toggle("Enable AI and agentic features", isOn: $settings.aiEnabled)
+                Text("Clippy can suggest titles, rewrite text, suggest a category, and draft new clips using the provider below. Proposed changes are shown for your approval before anything is written.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Provider") {
+                Picker("Provider", selection: $settings.aiProvider) {
+                    ForEach(AIProviderKind.allCases) { Text($0.displayName).tag($0) }
+                }
+                TextField("Model", text: $settings.aiModel,
+                          prompt: Text(settings.aiProvider.defaultModel))
+                Text(settings.aiProvider.modelHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Endpoint URL", text: $settings.aiBaseURL,
+                          prompt: Text(settings.aiProvider.defaultBaseURL))
+                if settings.aiProvider == .azureFoundry {
+                    TextField("API version", text: $settings.aiAzureAPIVersion)
+                }
+                if settings.aiProvider.needsAPIKey {
+                    SecureField("API key", text: $apiKey, prompt: Text("Paste, then Save"))
+                    HStack(spacing: 8) {
+                        Button("Save key") { saveKey() }
+                            .disabled(apiKey.isEmpty)
+                        Button("Clear") { clearKey() }
+                        Text(keyStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Ollama runs locally and needs no API key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Automation") {
+                Toggle("Auto-suggest a title for new clips", isOn: $settings.aiAutoSuggestTitles)
+                    .disabled(!settings.aiEnabled)
+                Text("The only action applied automatically. Everything else asks first, and titles can be edited or cleared anytime.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button(testing ? "Testing..." : "Test connection") { test() }
+                    .disabled(testing || !settings.aiEnabled)
+                if let testResult {
+                    Text(testResult)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { refreshKeyStatus() }
+        .onChange(of: settings.aiProvider) { refreshKeyStatus() }
+    }
+
+    private func refreshKeyStatus() {
+        apiKey = ""
+        guard settings.aiProvider.needsAPIKey else { keyStatus = ""; return }
+        keyStatus = KeychainStore.shared.has(account: settings.aiProvider.keychainAccount)
+            ? "Key stored in Keychain."
+            : "No key saved."
+    }
+
+    private func saveKey() {
+        let ok = KeychainStore.shared.write(apiKey, account: settings.aiProvider.keychainAccount)
+        keyStatus = ok ? "Key saved to Keychain." : "Could not save to Keychain."
+        apiKey = ""
+    }
+
+    private func clearKey() {
+        KeychainStore.shared.delete(account: settings.aiProvider.keychainAccount)
+        refreshKeyStatus()
+    }
+
+    private func test() {
+        testing = true
+        testResult = nil
+        switch AIService.fromSettings() {
+        case .failure(let error):
+            testResult = error.localizedDescription
+            testing = false
+        case .success(let service):
+            Task {
+                do {
+                    let proposal = try await service.suggestTitle(
+                        forText: "The quick brown fox jumps over the lazy dog.")
+                    await MainActor.run {
+                        testResult = "Connected. Sample title: \(proposal.proposed)"
+                        testing = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        testResult = error.localizedDescription
+                        testing = false
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct IntegrationsSettingsTab: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var cloud = CloudSyncEngine.shared
     @State private var exportResult: String?
     @State private var archiveResult: String?
 
@@ -515,22 +638,46 @@ private struct IntegrationsSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("AI and automation (planned)") {
+            Section("1Password") {
+                Toggle("Show 1Password vault in the sidebar", isOn: $settings.onePasswordEnabled)
+                TextField("Vault name", text: $settings.onePasswordVault, prompt: Text("Clippy"))
+                HStack {
+                    Image(systemName: OnePasswordService.isInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(OnePasswordService.isInstalled ? .green : .secondary)
+                    Text(OnePasswordService.isInstalled
+                         ? "1Password CLI (op) found."
+                         : "1Password CLI (op) not found. Enable it in 1Password 8 > Developer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Secrets in this vault appear as a sidebar category. Copying one reveals it through 1Password (you approve), places it on the clipboard, and is never recorded in history.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("iCloud sync") {
+                Toggle("Sync clips and categories via iCloud", isOn: $settings.iCloudSyncEnabled)
+                    .onChange(of: settings.iCloudSyncEnabled) {
+                        if settings.iCloudSyncEnabled { CloudSyncEngine.shared.startIfEnabled() }
+                    }
+                HStack {
+                    Button(cloud.syncing ? "Syncing..." : "Sync now") {
+                        Task { await CloudSyncEngine.shared.sync() }
+                    }
+                    .disabled(!settings.iCloudSyncEnabled || cloud.syncing)
+                    Text(cloud.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Mirrors your clips and categories to your private iCloud (CloudKit) database so they appear on your other Macs. Requires a signed build with the iCloud entitlement and being signed in to iCloud.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Automation") {
                 plannedRow(
                     "MCP server",
-                    detail: "Claude Code and Claude Desktop will be able to search, read, and set clips."
-                )
-                plannedRow(
-                    "Local REST API",
-                    detail: "Loopback-only HTTP endpoint with a Keychain bearer token, for Shortcuts and scripts."
-                )
-                plannedRow(
-                    "Sync",
-                    detail: "User-controlled: encrypted file in a folder you choose, or CloudKit private database."
-                )
-                plannedRow(
-                    "Encryption at rest",
-                    detail: "SQLCipher with the key in your Keychain."
+                    detail: "Built: integrations/clippy-mcp lets Claude Code and Claude Desktop search, read, add, delete, and categorize clips. See its README to enable."
                 )
             }
         }
@@ -556,36 +703,50 @@ private struct IntegrationsSettingsTab: View {
         .padding(.vertical, 2)
     }
 
-    private func exportTOML() {
+    /// Shared NSSavePanel scaffold. Returns the result string to display, or nil
+    /// when the user cancelled (so the caller leaves the prior message intact).
+    private func runSavePanel(name: String, types: [UTType],
+                              _ body: (URL) throws -> String) -> String? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText]
-        panel.nameFieldStringValue = "clippy.toml"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
+        panel.allowedContentTypes = types
+        panel.nameFieldStringValue = name
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do { return try body(url) }
+        catch { return "Export failed: \(error.localizedDescription)" }
+    }
+
+    /// Shared NSOpenPanel scaffold. Same cancel semantics as runSavePanel.
+    private func runOpenPanel(types: [UTType],
+                              _ body: (URL) throws -> String) -> String? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        do { return try body(url) }
+        catch { return "Import failed: \(error.localizedDescription)" }
+    }
+
+    private func exportTOML() {
+        let result = runSavePanel(name: "clippy.toml",
+                                  types: [UTType(filenameExtension: "toml") ?? .plainText]) { url in
             let toml = try ClippyArchive.exportTOML(from: ClipDatabase.shared)
             try toml.write(to: url, atomically: true, encoding: .utf8)
-            archiveResult = "Exported categories and pinned clips to \(url.lastPathComponent)."
-        } catch {
-            archiveResult = "Export failed: \(error.localizedDescription)"
+            return "Exported categories and pinned clips to \(url.lastPathComponent)."
         }
+        if let result { archiveResult = result }
     }
 
     private func importTOML() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText, .plainText, .text]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
+        let result = runOpenPanel(types: [UTType(filenameExtension: "toml") ?? .plainText, .plainText, .text]) { url in
             let text = try String(contentsOf: url, encoding: .utf8)
             let summary = try ClippyArchive.importTOML(text, into: ClipDatabase.shared)
             var message = "Imported \(summary.categories) categories and \(summary.clips) clips."
             if summary.skippedImages > 0 {
                 message += " Skipped \(summary.skippedImages) image(s) whose files were missing."
             }
-            archiveResult = message
-        } catch {
-            archiveResult = "Import failed: \(error.localizedDescription)"
+            return message
         }
+        if let result { archiveResult = result }
     }
 
     private func exportJSON() {
@@ -603,12 +764,7 @@ private struct IntegrationsSettingsTab: View {
             let clips: [ExportClip]
         }
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "clippy-export.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
+        let result = runSavePanel(name: "clippy-export.json", types: [.json]) { url in
             let database = ClipDatabase.shared
             let categories = try database.categories()
             let membership = try database.membershipMap()
@@ -638,9 +794,8 @@ private struct IntegrationsSettingsTab: View {
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(document).write(to: url)
-            exportResult = "Exported \(clips.count) clips to \(url.lastPathComponent)."
-        } catch {
-            exportResult = "Export failed: \(error.localizedDescription)"
+            return "Exported \(clips.count) clips to \(url.lastPathComponent)."
         }
+        if let result { exportResult = result }
     }
 }

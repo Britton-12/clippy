@@ -76,38 +76,11 @@ enum ClipKind: Equatable {
 
     // MARK: - Color parsing
 
-    /// #RGB, #RRGGBB, or #RRGGBBAA.
+    /// #RGB, #RRGGBB, or #RRGGBBAA. Delegates to the single `NSColor(themeHex:)`
+    /// parser; keeps the stricter `#`-required contract used by clip detection.
     static func parseHexColor(_ text: String) -> Color? {
-        guard text.hasPrefix("#") else { return nil }
-        let hex = String(text.dropFirst())
-        guard [3, 6, 8].contains(hex.count), hex.allSatisfy(\.isHexDigit) else { return nil }
-
-        let expanded: String
-        if hex.count == 3 {
-            expanded = hex.map { "\($0)\($0)" }.joined()
-        } else {
-            expanded = hex
-        }
-
-        var value: UInt64 = 0
-        guard Scanner(string: expanded).scanHexInt64(&value) else { return nil }
-
-        let red: Double
-        let green: Double
-        let blue: Double
-        let alpha: Double
-        if expanded.count == 8 {
-            red = Double((value >> 24) & 0xFF) / 255
-            green = Double((value >> 16) & 0xFF) / 255
-            blue = Double((value >> 8) & 0xFF) / 255
-            alpha = Double(value & 0xFF) / 255
-        } else {
-            red = Double((value >> 16) & 0xFF) / 255
-            green = Double((value >> 8) & 0xFF) / 255
-            blue = Double(value & 0xFF) / 255
-            alpha = 1
-        }
-        return Color(red: red, green: green, blue: blue, opacity: alpha)
+        guard text.hasPrefix("#"), let ns = NSColor(themeHex: text) else { return nil }
+        return Color(nsColor: ns)
     }
 }
 

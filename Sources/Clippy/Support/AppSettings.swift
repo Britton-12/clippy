@@ -68,6 +68,18 @@ final class AppSettings: ObservableObject {
         static let customTextPrimaryHex = "customTextPrimaryHex"
         static let customTextSecondaryHex = "customTextSecondaryHex"
         static let customAccentHex = "customAccentHex"
+        // AI / LLM integration
+        static let aiEnabled = "aiEnabled"
+        static let aiProvider = "aiProvider"
+        static let aiModel = "aiModel"
+        static let aiBaseURL = "aiBaseURL"
+        static let aiAzureAPIVersion = "aiAzureAPIVersion"
+        static let aiAutoSuggestTitles = "aiAutoSuggestTitles"
+        // 1Password integration
+        static let onePasswordEnabled = "onePasswordEnabled"
+        static let onePasswordVault = "onePasswordVault"
+        // iCloud sync
+        static let iCloudSyncEnabled = "iCloudSyncEnabled"
     }
 
     private let defaults: UserDefaults
@@ -191,6 +203,55 @@ final class AppSettings: ObservableObject {
     @Published var customTextSecondaryHex: String { didSet { defaults.set(customTextSecondaryHex, forKey: Keys.customTextSecondaryHex) } }
     @Published var customAccentHex: String { didSet { defaults.set(customAccentHex, forKey: Keys.customAccentHex) } }
 
+    // MARK: - AI / LLM integration
+
+    /// Master switch for all AI/agentic features. Off by default; nothing reaches
+    /// a provider until the user opts in and configures one.
+    @Published var aiEnabled: Bool {
+        didSet { defaults.set(aiEnabled, forKey: Keys.aiEnabled) }
+    }
+    /// Which backend to talk to. The API key (when needed) lives in the keychain,
+    /// never here.
+    @Published var aiProvider: AIProviderKind {
+        didSet { defaults.set(aiProvider.rawValue, forKey: Keys.aiProvider) }
+    }
+    /// Model id / Azure deployment name. Empty falls back to the provider default.
+    @Published var aiModel: String {
+        didSet { defaults.set(aiModel, forKey: Keys.aiModel) }
+    }
+    /// Endpoint base URL. Empty falls back to the provider default.
+    @Published var aiBaseURL: String {
+        didSet { defaults.set(aiBaseURL, forKey: Keys.aiBaseURL) }
+    }
+    /// Azure AI Foundry data-plane api-version.
+    @Published var aiAzureAPIVersion: String {
+        didSet { defaults.set(aiAzureAPIVersion, forKey: Keys.aiAzureAPIVersion) }
+    }
+    /// When on, newly captured clips get an AI-suggested title automatically
+    /// (still reversible; the only auto-applied action).
+    @Published var aiAutoSuggestTitles: Bool {
+        didSet { defaults.set(aiAutoSuggestTitles, forKey: Keys.aiAutoSuggestTitles) }
+    }
+
+    // MARK: - 1Password
+
+    /// Show the 1Password vault as a sidebar category. Off by default; requires
+    /// the `op` CLI installed and signed in.
+    @Published var onePasswordEnabled: Bool {
+        didSet { defaults.set(onePasswordEnabled, forKey: Keys.onePasswordEnabled) }
+    }
+    /// The vault Clippy reads from and creates secrets in.
+    @Published var onePasswordVault: String {
+        didSet { defaults.set(onePasswordVault, forKey: Keys.onePasswordVault) }
+    }
+
+    // MARK: - iCloud sync
+
+    /// Mirror clips and categories to the user's private CloudKit database.
+    @Published var iCloudSyncEnabled: Bool {
+        didSet { defaults.set(iCloudSyncEnabled, forKey: Keys.iCloudSyncEnabled) }
+    }
+
     /// The resolved token table for the active theme. Views read this.
     var theme: ThemeTokens { Theme.tokens(self) }
 
@@ -295,6 +356,15 @@ final class AppSettings: ObservableObject {
             Keys.customTextPrimaryHex: "#1F2328",
             Keys.customTextSecondaryHex: "#656D76",
             Keys.customAccentHex: "#0969DA",
+            Keys.aiEnabled: false,
+            Keys.aiProvider: AIProviderKind.ollama.rawValue,
+            Keys.aiModel: "",
+            Keys.aiBaseURL: "",
+            Keys.aiAzureAPIVersion: "2024-10-21",
+            Keys.aiAutoSuggestTitles: false,
+            Keys.onePasswordEnabled: false,
+            Keys.onePasswordVault: "Clippy",
+            Keys.iCloudSyncEnabled: false,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
         panelWidth = defaults.double(forKey: Keys.panelWidth)
@@ -342,6 +412,15 @@ final class AppSettings: ObservableObject {
         customTextPrimaryHex = defaults.string(forKey: Keys.customTextPrimaryHex) ?? "#1F2328"
         customTextSecondaryHex = defaults.string(forKey: Keys.customTextSecondaryHex) ?? "#656D76"
         customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? "#0969DA"
+        aiEnabled = defaults.bool(forKey: Keys.aiEnabled)
+        aiProvider = AIProviderKind(rawValue: defaults.string(forKey: Keys.aiProvider) ?? "") ?? .ollama
+        aiModel = defaults.string(forKey: Keys.aiModel) ?? ""
+        aiBaseURL = defaults.string(forKey: Keys.aiBaseURL) ?? ""
+        aiAzureAPIVersion = defaults.string(forKey: Keys.aiAzureAPIVersion) ?? "2024-10-21"
+        aiAutoSuggestTitles = defaults.bool(forKey: Keys.aiAutoSuggestTitles)
+        onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
+        onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? "Clippy"
+        iCloudSyncEnabled = defaults.bool(forKey: Keys.iCloudSyncEnabled)
     }
 
     /// Resolve the stored sound id, migrating the legacy classic-enum key the

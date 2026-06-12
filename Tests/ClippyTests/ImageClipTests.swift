@@ -5,7 +5,7 @@ final class ImageClipTests: XCTestCase {
     private func storeImage(_ db: ClipDatabase, data: Data) throws -> Clip {
         let stored = try db.media.store(pngData: data)
         var clip = makeImageClip(stored)
-        try db.saveCapturedImageClip(&clip)
+        try db.saveCapturedImageClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         return clip
     }
 
@@ -51,6 +51,31 @@ final class ImageClipTests: XCTestCase {
             try XCTUnwrap(clip.mediaFilename),
             try XCTUnwrap(clip.thumbFilename),
         ])
+    }
+
+    func testUpdateClipImageRepointsRowAndFreesOldFile() throws {
+        let db = try makeTestDatabase(self)
+        let png = MediaStoreTests().makePNGData()
+        _ = try storeImage(db, data: png)
+        let clip = try XCTUnwrap(db.allClips().first)
+        let oldMedia = try XCTUnwrap(clip.mediaFilename)
+        let oldMediaURL = db.media.url(for: oldMedia)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldMediaURL.path))
+
+        // Edit (crop) the image and save it back through the editor's DB path.
+        let original = try XCTUnwrap(NSImage(data: png))
+        let cropped = try XCTUnwrap(ImageEditing.cropped(original, to: CGRect(x: 0, y: 0, width: 100, height: 100)))
+        let newPNG = try XCTUnwrap(ImageEditing.pngData(cropped))
+        let stored = try db.media.store(pngData: newPNG)
+        try db.updateClipImage(id: try XCTUnwrap(clip.id), stored: stored)
+
+        let updated = try XCTUnwrap(db.allClips().first)
+        XCTAssertEqual(updated.mediaFilename, stored.mediaFilename)
+        XCTAssertNotEqual(updated.mediaFilename, oldMedia)
+        XCTAssertEqual(updated.pixelWidth, 100)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldMediaURL.path),
+                       "old media file should be freed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: db.media.url(for: stored.mediaFilename).path))
     }
 
     func testCapEvictionRemovesMediaFiles() throws {

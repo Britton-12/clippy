@@ -27,6 +27,9 @@ struct CategorySidePane: View {
                     ForEach(store.categories) { category in
                         categoryRow(category)
                     }
+                    if settings.onePasswordEnabled {
+                        onePasswordRow
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -114,6 +117,20 @@ struct CategorySidePane: View {
             return true
         }
         .accessibilityLabel("\(category.name), \(store.clipCount(inCategory: categoryID)) clips")
+    }
+
+    private var onePasswordRow: some View {
+        sidePaneRow(
+            isSelected: selection == .onePassword,
+            tint: Color(nsColor: .systemBlue),
+            icon: { Image(systemName: "key.fill").font(.system(size: 12, weight: .semibold)) },
+            title: "1Password",
+            count: nil,
+            help: "Secrets shared to Clippy"
+        ) {
+            selection = selection == .onePassword ? .history : .onePassword
+        }
+        .accessibilityLabel("1Password secrets")
     }
 
     private var newCategoryRow: some View {

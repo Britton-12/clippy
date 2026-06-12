@@ -274,9 +274,3 @@ enum CategoryPalette {
     ]
 }
 
-extension Color {
-    /// #RGB, #RRGGBB, or #RRGGBBAA; falls back to system gray.
-    init(hexString: String) {
-        self = ClipKind.parseHexColor(hexString) ?? Color(nsColor: .systemGray)
-    }
-}

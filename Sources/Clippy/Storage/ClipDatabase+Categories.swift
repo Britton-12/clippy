@@ -141,13 +141,17 @@ extension ClipDatabase {
     // Whole-table load is bounded in practice: uncategorized clips are capped
     // and categorized clips are user-curated.
     func membershipMap() throws -> [Int64: Set<Int64>] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT clipID, categoryID FROM clip_category")
-            var map: [Int64: Set<Int64>] = [:]
-            for row in rows {
-                map[row["clipID"], default: []].insert(row["categoryID"])
-            }
-            return map
+        try dbQueue.read { try Self.buildMembershipMap($0) }
+    }
+
+    /// The single clipID -> categoryID fold. `static` so the `ValueObservation`
+    /// closure in ClipStore can call it without capturing a `ClipDatabase`.
+    static func buildMembershipMap(_ db: Database) throws -> [Int64: Set<Int64>] {
+        let rows = try Row.fetchAll(db, sql: "SELECT clipID, categoryID FROM clip_category")
+        var map: [Int64: Set<Int64>] = [:]
+        for row in rows {
+            map[row["clipID"], default: []].insert(row["categoryID"])
         }
+        return map
     }
 }

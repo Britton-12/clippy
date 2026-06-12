@@ -78,6 +78,15 @@ final class MediaStore {
         }
     }
 
+    /// PNG bytes for an image via the AppKit imaging stack. A Clippy-exported PNG
+    /// passes through; other formats are normalized. Shared by clipboard capture
+    /// and archive import, which each supply their own source-specific decode.
+    static func pngData(from image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
     /// CGContext (not NSImage.lockFocus) so this is safe off the main thread;
     /// capture may run from background callers.
     private static func thumbnailJPEG(from rep: NSBitmapImageRep) throws -> Data {

@@ -57,11 +57,7 @@ final class ClipStore: ObservableObject {
 
         let categoryObservation = ValueObservation.tracking { db -> ([Category], [Int64: Set<Int64>]) in
             let categories = try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
-            let rows = try Row.fetchAll(db, sql: "SELECT clipID, categoryID FROM clip_category")
-            var map: [Int64: Set<Int64>] = [:]
-            for row in rows {
-                map[row["clipID"], default: []].insert(row["categoryID"])
-            }
+            let map = try ClipDatabase.buildMembershipMap(db)
             return (categories, map)
         }
         categoriesCancellable = categoryObservation.start(
@@ -145,6 +141,26 @@ final class ClipStore: ObservableObject {
     func updateText(of clip: Clip, to newText: String) {
         guard let id = clip.id else { return }
         try? database.updateClipText(id: id, newText: newText)
+    }
+
+    /// Save an edited image clip: store the new PNG, repoint the row, free the
+    /// old files. Returns true on success so the editor can confirm.
+    @discardableResult
+    func updateImage(of clip: Clip, to pngData: Data) -> Bool {
+        guard let id = clip.id else { return false }
+        do {
+            let stored = try database.media.store(pngData: pngData)
+            try database.updateClipImage(id: id, stored: stored)
+            return true
+        } catch {
+            NSLog("Clippy: failed to save edited image: \(error)")
+            return false
+        }
+    }
+
+    /// The on-disk URL of an image clip's full-resolution PNG, for the editor.
+    func imageURL(for clip: Clip) -> URL? {
+        clip.mediaFilename.map { database.media.url(for: $0) }
     }
 
     func renameClip(_ clip: Clip, userTitle: String?) {

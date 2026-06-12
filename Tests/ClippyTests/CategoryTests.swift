@@ -42,7 +42,7 @@ final class CategoryTests: XCTestCase {
     func testCategoryCRUDAndMembership() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("snippet")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         let work = try db.createCategory(
@@ -84,7 +84,7 @@ final class CategoryTests: XCTestCase {
         XCTAssertNil(try db.starterCategory())
 
         var clip = makeTextClip("pin me")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         // Cmd+P with no starter present must recreate one and pin into it.
@@ -98,7 +98,7 @@ final class CategoryTests: XCTestCase {
     func testToggleStarterMembership() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("pin me")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
         let starterID = try XCTUnwrap(db.starterCategory()?.id)
 

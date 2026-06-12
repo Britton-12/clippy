@@ -239,6 +239,12 @@ extension Color {
 
     /// "#RRGGBB" for persistence from a SwiftUI ColorPicker selection.
     var themeHexString: String { NSColor(self).themeHexString }
+
+    /// #RGB, #RRGGBB, or #RRGGBBAA; falls back to system gray. Used for category
+    /// colors, which deliberately fall back to gray rather than the theme magenta.
+    init(hexString: String) {
+        self = ClipKind.parseHexColor(hexString) ?? Color(nsColor: .systemGray)
+    }
 }
 
 extension NSColor {

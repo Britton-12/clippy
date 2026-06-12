@@ -1,0 +1,99 @@
+import Foundation
+
+/// Role in a chat exchange. Anthropic keeps `system` out of the message list, so
+/// providers that need it split it out themselves.
+enum AIRole: String, Codable {
+    case system
+    case user
+    case assistant
+}
+
+struct AIMessage: Equatable {
+    let role: AIRole
+    let content: String
+}
+
+struct AICompletionOptions {
+    var temperature: Double = 0.3
+    var maxTokens: Int = 1024
+}
+
+enum AIError: LocalizedError, Equatable {
+    case notConfigured(String)
+    case badURL(String)
+    case http(Int, String)
+    case decoding(String)
+    case empty
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured(let why): return "AI is not configured: \(why)"
+        case .badURL(let url): return "Invalid endpoint URL: \(url)"
+        case .http(let code, let body):
+            let snippet = body.prefix(300)
+            return "Provider returned HTTP \(code): \(snippet)"
+        case .decoding(let why): return "Could not read the provider response: \(why)"
+        case .empty: return "The provider returned an empty response."
+        }
+    }
+}
+
+/// One chat-completion call. Every backend (Ollama, OpenAI, Anthropic, Azure AI
+/// Foundry) implements this; the rest of the app only depends on this protocol,
+/// which keeps the agentic features testable with a mock.
+protocol AIProvider {
+    func complete(_ messages: [AIMessage], options: AICompletionOptions) async throws -> String
+}
+
+/// The backends Clippy can talk to. `ollama` is local and needs no key.
+enum AIProviderKind: String, CaseIterable, Codable, Identifiable {
+    case ollama
+    case openai
+    case anthropic
+    case azureFoundry
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ollama: return "Ollama (local)"
+        case .openai: return "OpenAI"
+        case .anthropic: return "Anthropic"
+        case .azureFoundry: return "Microsoft Foundry"
+        }
+    }
+
+    /// Local Ollama needs no credential; the hosted providers do.
+    var needsAPIKey: Bool { self != .ollama }
+
+    /// Keychain account under which this provider's key is stored.
+    var keychainAccount: String { "ai.\(rawValue).apiKey" }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .ollama: return "http://localhost:11434"
+        case .openai: return "https://api.openai.com"
+        case .anthropic: return "https://api.anthropic.com"
+        case .azureFoundry: return "https://YOUR-RESOURCE.services.ai.azure.com"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .ollama: return "llama3.1"
+        case .openai: return "gpt-4o-mini"
+        case .anthropic: return "claude-3-5-haiku-latest"
+        case .azureFoundry: return "gpt-4o-mini"
+        }
+    }
+
+    /// One-line hint shown under the model field in Settings.
+    var modelHint: String {
+        switch self {
+        case .ollama: return "A model you have pulled, e.g. llama3.1 or qwen2.5."
+        case .openai: return "An OpenAI chat model, e.g. gpt-4o-mini."
+        case .anthropic: return "A Claude model id, e.g. claude-3-5-haiku-latest."
+        case .azureFoundry: return "Your Azure deployment name."
+        }
+    }
+}

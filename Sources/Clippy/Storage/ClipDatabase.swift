@@ -142,39 +142,26 @@ final class ClipDatabase {
 
     /// Insert a freshly captured clip. A duplicate of an existing clip is not
     /// re-inserted; its timestamp is bumped so it surfaces at the top.
-    func saveCapturedClip(_ clip: inout Clip, cap: Int = AppSettings.shared.maxHistoryItems) throws {
-        let newClip = clip
-        var evicted: [String] = []
-        try dbQueue.write { db in
-            if var existing = try Clip
-                .filter(Column("contentText") == newClip.contentText)
-                .filter(Column("contentKind") == ClipContentKind.text.rawValue)
-                .fetchOne(db)
-            {
-                existing.createdAt = newClip.createdAt
-                existing.sourceAppBundleID = newClip.sourceAppBundleID
-                existing.sourceAppName = newClip.sourceAppName
-                try existing.update(db)
-                return
-            }
-            var inserting = newClip
-            try inserting.insert(db)
-            evicted = try Self.evictOverCap(db, cap: cap)
-        }
-        media.delete(filenames: evicted)
+    func saveCapturedClip(_ clip: inout Clip, cap: Int) throws {
+        try upsertCaptured(&clip, cap: cap, matchedBy: Clip.duplicateText(of: clip.contentText))
     }
 
     /// Insert a captured image clip. Media files are written by MediaStore
     /// BEFORE this runs. Dedupe key is the content-hash filename; a re-copy
     /// bumps the timestamp.
-    func saveCapturedImageClip(_ clip: inout Clip, cap: Int = AppSettings.shared.maxHistoryItems) throws {
+    func saveCapturedImageClip(_ clip: inout Clip, cap: Int) throws {
+        try upsertCaptured(&clip, cap: cap, matchedBy: Clip.duplicateImage(mediaFilename: clip.mediaFilename))
+    }
+
+    /// Shared capture body: bump-on-duplicate, else insert + evict over cap, then
+    /// delete the media files freed by eviction. The dedupe predicate is the only
+    /// thing that differs between text and image capture.
+    private func upsertCaptured(_ clip: inout Clip, cap: Int,
+                                matchedBy request: QueryInterfaceRequest<Clip>) throws {
         let newClip = clip
         var evicted: [String] = []
         try dbQueue.write { db in
-            if var existing = try Clip
-                .filter(Column("mediaFilename") == newClip.mediaFilename)
-                .fetchOne(db)
-            {
+            if var existing = try request.fetchOne(db) {
                 existing.createdAt = newClip.createdAt
                 existing.sourceAppBundleID = newClip.sourceAppBundleID
                 existing.sourceAppName = newClip.sourceAppName
@@ -245,6 +232,29 @@ final class ClipDatabase {
         }
     }
 
+    /// User edited an image clip. New media files are written by MediaStore
+    /// BEFORE this runs; the row is repointed at them and the now-unreferenced old
+    /// files are deleted (unless the new content hashes to the same filename).
+    func updateClipImage(id: Int64, stored: MediaStore.StoredImage) throws {
+        let oldFilenames: [String] = try dbQueue.write { db in
+            let existing = try Clip.fetchOne(db, key: id)
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET mediaFilename = ?, thumbFilename = ?, pixelWidth = ?, pixelHeight = ?, byteSize = ?,
+                        typeIdentifier = 'public.png', contentKind = ?
+                    WHERE id = ?
+                    """,
+                arguments: [stored.mediaFilename, stored.thumbFilename,
+                            stored.pixelWidth, stored.pixelHeight, stored.byteSize,
+                            ClipContentKind.image.rawValue, id]
+            )
+            return existing?.mediaFilenames ?? []
+        }
+        let keep: Set<String> = [stored.mediaFilename, stored.thumbFilename]
+        media.delete(filenames: oldFilenames.filter { !keep.contains($0) })
+    }
+
     func deleteClip(id: Int64) throws {
         let filenames: [String] = try dbQueue.write { db in
             let clip = try Clip.fetchOne(db, key: id)
@@ -313,4 +323,18 @@ final class ClipDatabase {
     /// Stored here because extensions cannot declare stored properties; the
     /// category API lives in ClipDatabase+Categories.swift.
     var cachedStarterCategoryID: Int64?
+}
+
+extension Clip {
+    /// The capture/import dedupe predicate for a text clip: same text, kind text.
+    static func duplicateText(of contentText: String) -> QueryInterfaceRequest<Clip> {
+        Clip.filter(Column("contentText") == contentText)
+            .filter(Column("contentKind") == ClipContentKind.text.rawValue)
+    }
+
+    /// The capture/import dedupe predicate for an image clip: same media filename
+    /// (a content hash), so a re-copy of the same image bumps rather than duplicates.
+    static func duplicateImage(mediaFilename: String?) -> QueryInterfaceRequest<Clip> {
+        Clip.filter(Column("mediaFilename") == mediaFilename)
+    }
 }

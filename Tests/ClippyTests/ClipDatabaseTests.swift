@@ -6,7 +6,7 @@ final class ClipDatabaseTests: XCTestCase {
         let db = try makeTestDatabase(self)
         XCTAssertTrue(db.databaseURL.path.contains("clippy-tests-"))
         var clip = makeTextClip("hello")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         XCTAssertEqual(try db.allClips().count, 1)
     }
 }

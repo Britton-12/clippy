@@ -87,7 +87,7 @@ final class ClipTitleTests: XCTestCase {
     func testUpdateClipTitlePersistsAndReloads() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("hello")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         try db.updateClipTitle(id: clipID, userTitle: "My Snippet")
@@ -99,7 +99,7 @@ final class ClipTitleTests: XCTestCase {
     func testUpdateClipTitleClearsWithNil() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("hello")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         try db.updateClipTitle(id: clipID, userTitle: "Temporary")
@@ -137,7 +137,7 @@ final class ClipTitleTests: XCTestCase {
     func testFTSMatchesUserTitle() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("generic content")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         try db.updateClipTitle(id: clipID, userTitle: "Quarterly Report")
@@ -152,7 +152,7 @@ final class ClipTitleTests: XCTestCase {
     func testFirstCategoryReturnsLowestSortOrder() throws {
         let db = try makeTestDatabase(self)
         var clip = makeTextClip("test")
-        try db.saveCapturedClip(&clip)
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let clipID = try XCTUnwrap(db.allClips().first?.id)
 
         let alpha = try db.createCategory(

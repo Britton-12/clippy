@@ -12,8 +12,8 @@ final class ClippyArchiveTests: XCTestCase {
 
         // Include a multi-line clip with a quote to exercise string escaping.
         let multiline = "func main() {\n    print(\"hi\")\n}"
-        var c1 = makeTextClip("swift build"); try source.saveCapturedClip(&c1)
-        var c2 = makeTextClip(multiline); try source.saveCapturedClip(&c2)
+        var c1 = makeTextClip("swift build"); try source.saveCapturedClip(&c1, cap: AppSettings.shared.maxHistoryItems)
+        var c2 = makeTextClip(multiline); try source.saveCapturedClip(&c2, cap: AppSettings.shared.maxHistoryItems)
         let id1 = try XCTUnwrap(source.allClips().first { $0.contentText == "swift build" }?.id)
         let id2 = try XCTUnwrap(source.allClips().first { $0.contentText == multiline }?.id)
         try source.setClip(id1, inCategory: workID, true)
@@ -56,7 +56,7 @@ final class ClippyArchiveTests: XCTestCase {
             named: "Notes", colorHex: "#34C759", iconKind: .emoji, iconValue: "\u{1F4DD}"
         )
         let notesID = try XCTUnwrap(notes.id)
-        var clip = makeTextClip("remember this"); try source.saveCapturedClip(&clip)
+        var clip = makeTextClip("remember this"); try source.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
         let cid = try XCTUnwrap(source.allClips().first?.id)
         try source.setClip(cid, inCategory: notesID, true)
         let toml = try ClippyArchive.exportTOML(from: source)

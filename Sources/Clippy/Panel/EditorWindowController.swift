@@ -6,25 +6,19 @@ import SwiftUI
 final class EditorWindowController {
     private var window: NSWindow?
 
-    func open(clip: Clip, onSave: @escaping (String) -> Void) {
-        let editor = ClipEditorView(
-            initialText: clip.contentText,
-            onSave: { [weak self] text in
-                onSave(text)
-                self?.close()
-            },
-            onCancel: { [weak self] in
-                self?.close()
-            }
-        )
+    func open(clip: Clip, store: ClipStore) {
+        let editor = ClipEditorView(clip: clip, store: store, onClose: { [weak self] in
+            self?.close()
+        })
 
+        let isImage = clip.contentKind == .image
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: isImage ? 640 : 560, height: isImage ? 540 : 420),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Edit Clip"
+        window.title = isImage ? "Edit Image" : "Edit Clip"
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: editor)
         window.center()

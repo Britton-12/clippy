@@ -81,11 +81,7 @@ extension ClipDatabase {
         text: String, title: String?, sourceApp: String?, createdAt: Date
     ) throws -> Int64 {
         try dbQueue.write { db in
-            if let existing = try Clip
-                .filter(Column("contentText") == text)
-                .filter(Column("contentKind") == ClipContentKind.text.rawValue)
-                .fetchOne(db)
-            {
+            if let existing = try Clip.duplicateText(of: text).fetchOne(db) {
                 let id = existing.id ?? -1
                 if let title {
                     try db.execute(sql: "UPDATE clips SET userTitle = ? WHERE id = ?", arguments: [title, id])
@@ -114,18 +110,11 @@ extension ClipDatabase {
         guard let raw = FileManager.default.contents(atPath: path) else { return nil }
         // Normalize to PNG via the imaging stack; a Clippy-exported PNG passes
         // through unchanged, other formats are converted.
-        let pngData: Data
-        if let image = NSImage(data: raw),
-           let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff),
-           let png = rep.representation(using: .png, properties: [:]) {
-            pngData = png
-        } else {
-            return nil
-        }
+        guard let image = NSImage(data: raw),
+              let pngData = MediaStore.pngData(from: image) else { return nil }
         let stored = try media.store(pngData: pngData)
         return try dbQueue.write { db in
-            if let existing = try Clip.filter(Column("mediaFilename") == stored.mediaFilename).fetchOne(db) {
+            if let existing = try Clip.duplicateImage(mediaFilename: stored.mediaFilename).fetchOne(db) {
                 return existing.id
             }
             var clip = Clip(
