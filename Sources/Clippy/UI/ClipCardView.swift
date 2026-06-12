@@ -360,6 +360,7 @@ struct ClipCardView: View {
                 .foregroundStyle(tokens.textSecondary)
                 .lineLimit(1)
         }
+        .accessibilityLabel("Color \(clip.contentText)")
     }
 
     /// Tint fraction as a 0-1 Double from the 0-20 integer setting.

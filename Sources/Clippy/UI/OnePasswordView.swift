@@ -268,6 +268,9 @@ private struct FieldRow: View {
     let autoClear: Bool
     let autoClearSecs: Int
 
+    @ObservedObject private var settings = AppSettings.shared
+    private var tokens: ThemeTokens { settings.theme }
+
     @State private var revealed = false
     @State private var copying = false
     @State private var copyError: String?
@@ -285,7 +288,7 @@ private struct FieldRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5))
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 5))
         .onDisappear {
             // Reset reveal state when the row leaves the view hierarchy
             // (item collapsed or view dismissed).
