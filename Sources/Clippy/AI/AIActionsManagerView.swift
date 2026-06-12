@@ -6,8 +6,12 @@ import SwiftUI
 /// support. Built-ins are editable but non-deletable and restorable to defaults.
 struct AIActionsManagerView: View {
     @ObservedObject private var store = AIActionStore.shared
+    @ObservedObject private var settings = AppSettings.shared
     @State private var editingAction: AIAction?
     @State private var isCreating = false
+    @State private var deletingAction: AIAction?
+
+    private var tokens: ThemeTokens { settings.theme }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,12 +76,30 @@ struct AIActionsManagerView: View {
     // MARK: Action list
 
     private var actionList: some View {
-        List {
-            ForEach(store.actions) { action in
-                actionRow(action)
+        ScrollView {
+            LazyVStack(spacing: 4) {
+                ForEach(store.actions) { action in
+                    actionRow(action)
+                }
             }
+            .padding(8)
         }
-        .listStyle(.inset)
+        .confirmationDialog(
+            "Delete \"\(deletingAction?.name ?? "")\"?",
+            isPresented: Binding(
+                get: { deletingAction != nil },
+                set: { if !$0 { deletingAction = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let action = deletingAction { store.delete(id: action.id) }
+                deletingAction = nil
+            }
+            Button("Cancel", role: .cancel) { deletingAction = nil }
+        } message: {
+            Text("This action cannot be recovered.")
+        }
     }
 
     private func actionRow(_ action: AIAction) -> some View {
@@ -85,31 +107,32 @@ struct AIActionsManagerView: View {
             Image(systemName: action.symbolName)
                 .font(.system(size: 13))
                 .frame(width: 20)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(action.name)
                         .font(.body)
+                        .foregroundStyle(tokens.textPrimary)
                     if action.isBuiltIn {
                         Text("Built-in")
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(tokens.textSecondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12),
+                            .background(tokens.cardBorder.opacity(0.5),
                                         in: RoundedRectangle(cornerRadius: 4))
                     }
                 }
                 Text(action.outputDisposition.label)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tokens.textSecondary)
             }
             Spacer()
             Button("Edit") { editingAction = action }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
             if !action.isBuiltIn {
-                Button("Delete", role: .destructive) { store.delete(id: action.id) }
+                Button("Delete", role: .destructive) { deletingAction = action }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .foregroundStyle(.red)
@@ -121,10 +144,28 @@ struct AIActionsManagerView: View {
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(tokens.textSecondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(tokens.cardBorder, lineWidth: 1)
+        )
+        .help(dispositionHelp(for: action.outputDisposition))
+    }
+
+    private func dispositionHelp(for disposition: AIActionOutputDisposition) -> String {
+        switch disposition {
+        case .proposeEdit:
+            return "Propose Edit: shows a before/after diff and asks you to confirm before overwriting."
+        case .newClip:
+            return "New Clip: inserts the result as a new clip in your history."
+        case .copyToClipboard:
+            return "Copy to Clipboard: copies the result directly to the clipboard."
+        }
     }
 }
 

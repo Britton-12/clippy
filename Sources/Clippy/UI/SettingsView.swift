@@ -20,7 +20,7 @@ struct SettingsView: View {
             Divider()
             detail
         }
-        .frame(width: 780, height: 580)
+        .frame(minWidth: 780, minHeight: 580)
         .tint(tokens.accent)
         // Track the theme's light/dark appearance and accent so the whole app,
         // not just the panel, follows the theme.
@@ -42,7 +42,7 @@ struct SettingsView: View {
             Spacer(minLength: 0)
             footer
         }
-        .frame(width: 214)
+        .frame(minWidth: 214, maxWidth: 214)
         .background(tokens.sidebar)
     }
 
@@ -101,7 +101,7 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Image(systemName: "paperclip")
+            Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 10))
             Text("Clippy \(Bundle.main.shortVersion)")
                 .font(.system(size: 10))
@@ -221,7 +221,7 @@ private struct GeneralSettingsTab: View {
         Form {
             Section("Hotkey") {
                 LabeledContent("Open panel", value: "\u{2318}\u{21E7}V")
-                Text("Custom hotkey recording is planned; the binding is fixed in this build.")
+                Text("The hotkey is fixed at Command-Shift-V.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -331,7 +331,7 @@ private struct AppearanceSettingsTab: View {
 
             // MARK: Transparency
             Section("Transparency") {
-                LabeledContent("Opacity: \(Int(settings.panelOpacity * 100))%") {
+                LabeledContent("Opacity: \(Int(settings.panelOpacity * 100))") {
                     Slider(value: $settings.panelOpacity, in: 0.3...1.0, step: 0.05)
                 }
                 Text("100% is fully solid. Lower values let the desktop show through a blur behind the panel.")
@@ -522,6 +522,8 @@ private struct CaptureSettingsTab: View {
     @State private var ignoredAppsText = AppSettings.shared.ignoredBundleIDs.joined(separator: "\n")
     @State private var soundVolumeSlider: Double = Double(AppSettings.shared.captureSoundVolume)
 
+    private var tokens: ThemeTokens { settings.theme }
+
     /// Distinct catalog groups, in first-seen order, for the sectioned picker.
     private var soundGroups: [String] {
         var seen = Set<String>()
@@ -614,15 +616,30 @@ private struct CaptureSettingsTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bundle IDs, one per line (e.g. com.apple.keychainaccess)")
                         .font(.caption)
-                    TextEditor(text: $ignoredAppsText)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(height: 90)
-                        .onChange(of: ignoredAppsText) { _, newValue in
-                            settings.ignoredBundleIDs = newValue
-                                .split(whereSeparator: \.isNewline)
-                                .map { $0.trimmingCharacters(in: .whitespaces) }
-                                .filter { !$0.isEmpty }
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $ignoredAppsText)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(height: 90)
+                            .cornerRadius(6)
+                            .onChange(of: ignoredAppsText) { _, newValue in
+                                settings.ignoredBundleIDs = newValue
+                                    .split(whereSeparator: \.isNewline)
+                                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                                    .filter { !$0.isEmpty }
+                            }
+                        if ignoredAppsText.isEmpty {
+                            Text("com.apple.keychainaccess\ncom.1password.1password")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
                         }
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(tokens.cardBorder, lineWidth: 1)
+                    )
                 }
             }
 
@@ -677,9 +694,11 @@ private struct AISettingsTab: View {
                         Button("Save key") { saveKey() }
                             .disabled(apiKey.isEmpty)
                         Button("Clear") { clearKey() }
-                        Text(keyStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if !keyStatus.isEmpty {
+                            Label(keyStatus, systemImage: keyStatus.hasPrefix("Key") ? "checkmark.circle.fill" : "xmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(keyStatus.hasPrefix("Key") ? Color.green : Color.secondary)
+                        }
                     }
                 } else {
                     Text("Ollama runs locally and needs no API key.")
@@ -702,7 +721,7 @@ private struct AISettingsTab: View {
             }
             .disabled(!settings.aiEnabled)
 
-            Section("Agent and Tools") {
+            Section("Agent and tools") {
                 Toggle("Allow AI to run my scripts", isOn: $settings.aiAgentAllowScripts)
                     .disabled(!settings.aiEnabled)
                 Text("When on, the AI Assistant can list and run your saved scripts. You will be shown a confirmation prompt each time before a script runs.")
@@ -872,8 +891,9 @@ private struct IntegrationsSettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Image(systemName: OnePasswordService.isInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                        .font(.caption)
                         .foregroundStyle(OnePasswordService.isInstalled ? .green : .secondary)
                     Text(OnePasswordService.isInstalled
                          ? "1Password CLI (op) found."
@@ -905,33 +925,8 @@ private struct IntegrationsSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Automation") {
-                plannedRow(
-                    "MCP server",
-                    detail: "Built: integrations/clippy-mcp lets Claude Code and Claude Desktop search, read, add, delete, and categorize clips. See its README to enable."
-                )
-            }
         }
         .formStyle(.grouped)
-    }
-
-    private func plannedRow(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text("Planned")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.15), in: Capsule())
-                    .foregroundStyle(.secondary)
-            }
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 2)
     }
 
     /// Shared NSSavePanel scaffold. Returns the result string to display, or nil

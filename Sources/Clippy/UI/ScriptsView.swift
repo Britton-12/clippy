@@ -5,6 +5,9 @@ import SwiftUI
 /// Run executes it in a subprocess (after a confirmation) and shows the output.
 struct ScriptsView: View {
     @ObservedObject private var store = ScriptStore.shared
+    @ObservedObject private var settings = AppSettings.shared
+
+    private var tokens: ThemeTokens { settings.theme }
 
     @State private var selection: UUID?
     @State private var editing = Script(name: "")
@@ -65,7 +68,7 @@ struct ScriptsView: View {
 
                 PlainTextEditor(text: $editing.body)
                     .frame(minHeight: 140)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(tokens.cardBorder, lineWidth: 1))
 
                 Toggle("Feed the current clipboard text to the script (stdin and $CLIPPY_CLIP)",
                        isOn: $editing.feedsClipboard)

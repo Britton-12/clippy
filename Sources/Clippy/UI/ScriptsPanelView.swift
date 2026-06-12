@@ -78,8 +78,9 @@ struct ScriptsPanelView: View {
 
     private var manageHeader: some View {
         HStack {
-            Text("Scripts")
-                .font(PanelTypography.metadata(settings).weight(.semibold))
+            Text("SCRIPTS")
+                .font(PanelTypography.micro(settings).weight(.semibold))
+                .kerning(0.6)
                 .foregroundStyle(tokens.textSecondary)
             Spacer()
             Button("Manage...") {
@@ -139,7 +140,7 @@ private struct ScriptRowView: View {
                         flagBadge("arrow.down.to.line", "Writes to clipboard")
                     }
                     Spacer(minLength: 0)
-                    Text(script.updatedAt.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))
+                    Text(script.updatedAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
                         .font(PanelTypography.micro(settings))
                         .foregroundStyle(tokens.textSecondary)
                 }
@@ -152,11 +153,11 @@ private struct ScriptRowView: View {
     private var interpreterBadge: some View {
         Text(script.interpreter.displayName)
             .font(PanelTypography.micro(settings).weight(.medium))
-            .foregroundStyle(Color(nsColor: .systemGreen))
+            .foregroundStyle(tokens.accent)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(
-                Color(nsColor: .systemGreen).opacity(0.12),
+                tokens.accent.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 4, style: .continuous)
             )
     }

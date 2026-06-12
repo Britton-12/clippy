@@ -54,14 +54,19 @@ struct CategoryEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             TextField("Category name", text: $name)
                 .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    onSave(name.trimmingCharacters(in: .whitespaces), colorHex, iconKind, iconValue)
+                    dismiss()
+                }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Color")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    ForEach(CategoryPalette.hexes, id: \.self) { hex in
-                        colorSwatch(hex)
+                    ForEach(Array(CategoryPalette.hexes.enumerated()), id: \.element) { index, hex in
+                        colorSwatch(hex, index: index + 1)
                     }
                 }
             }
@@ -97,7 +102,7 @@ struct CategoryEditorView: View {
         .frame(width: 280)
     }
 
-    private func colorSwatch(_ hex: String) -> some View {
+    private func colorSwatch(_ hex: String, index: Int) -> some View {
         let isSelected = colorHex == hex
         return Button {
             colorHex = hex
@@ -108,7 +113,7 @@ struct CategoryEditorView: View {
                 .overlay(Circle().strokeBorder(.primary.opacity(isSelected ? 0.7 : 0), lineWidth: 2))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Color \(hex)")
+        .accessibilityLabel("Color \(index)")
     }
 
     @ViewBuilder
@@ -138,18 +143,25 @@ struct CategoryEditorView: View {
                         .accessibilityLabel(emoji)
                     }
                 case .appLogo:
-                    ForEach(knownBundleIDs, id: \.self) { bundleID in
-                        iconCell(isSelected: iconKind == .appLogo && iconValue == bundleID) {
-                            iconKind = .appLogo
-                            iconValue = bundleID
-                        } content: {
-                            if let icon = AppIconProvider.shared.icon(forBundleID: bundleID) {
-                                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
-                            } else {
-                                Image(systemName: "app.dashed").font(.system(size: 14))
+                    if knownBundleIDs.isEmpty {
+                        Text("Copy something from an app to see its icon here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .gridCellColumns(3)
+                    } else {
+                        ForEach(knownBundleIDs, id: \.self) { bundleID in
+                            iconCell(isSelected: iconKind == .appLogo && iconValue == bundleID) {
+                                iconKind = .appLogo
+                                iconValue = bundleID
+                            } content: {
+                                if let icon = AppIconProvider.shared.icon(forBundleID: bundleID) {
+                                    Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                                } else {
+                                    Image(systemName: "app.dashed").font(.system(size: 14))
+                                }
                             }
+                            .accessibilityLabel(bundleID)
                         }
-                        .accessibilityLabel(bundleID)
                     }
                 }
             }

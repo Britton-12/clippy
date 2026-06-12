@@ -15,6 +15,8 @@ struct AssistantMessage: Identifiable {
     let id = UUID()
     let role: Role
     var text: String
+    /// When true this assistant message carries an error, not a normal reply.
+    var isError: Bool = false
     /// Tool activity notices attached to this message (assistant turns only).
     var toolActivities: [ToolActivity] = []
 }
@@ -43,8 +45,6 @@ final class AIAssistantViewModel: ObservableObject {
         let prompt: String
         var continuation: CheckedContinuation<Bool, Never>?
     }
-
-    private var confirmationResult: Bool = false
 
     /// Kick off a user turn. Builds the provider from current settings,
     /// dispatches to the agent loop, feeds replies back to `messages`.
@@ -103,16 +103,13 @@ final class AIAssistantViewModel: ObservableObject {
                 let answer = try await AIAgent.completeWithTools(
                     messages: history,
                     provider: provider,
-                    tools: registry.all,
-                    confirm: { [weak self] prompt in
-                        guard let self else { return false }
-                        return await self.askConfirmation(prompt)
-                    }
+                    tools: registry.all
                 )
                 self.messages[assistantIndex].text = answer
                 self.state = .ready
             } catch {
                 self.messages[assistantIndex].text = error.localizedDescription
+                self.messages[assistantIndex].isError = true
                 self.state = .ready
             }
         }
@@ -164,6 +161,7 @@ struct AIAssistantPanelView: View {
     @StateObject private var vm = AIAssistantViewModel()
     @ObservedObject private var settings = AppSettings.shared
     @FocusState private var inputFocused: Bool
+    @State private var confirmClear = false
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -197,7 +195,7 @@ struct AIAssistantPanelView: View {
             Spacer()
             if !vm.messages.isEmpty {
                 Button {
-                    vm.clearConversation()
+                    confirmClear = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -205,6 +203,12 @@ struct AIAssistantPanelView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Clear conversation")
+                .confirmationDialog("Clear this conversation?", isPresented: $confirmClear, titleVisibility: .visible) {
+                    Button("Clear", role: .destructive) { vm.clearConversation() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("All messages will be removed and cannot be recovered.")
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -319,6 +323,11 @@ struct AIAssistantPanelView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(tokens.cardBorder, lineWidth: 1)
+        )
     }
 
     private func notConfiguredState(icon: String, message: String, cta: String) -> some View {
@@ -348,6 +357,7 @@ struct AIAssistantPanelView: View {
                 .font(PanelTypography.body(settings))
                 .foregroundStyle(tokens.textPrimary)
                 .focused($inputFocused)
+                .accessibilityLabel("Message input")
                 .onSubmit {
                     if !vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         && vm.state == .ready {
@@ -368,6 +378,7 @@ struct AIAssistantPanelView: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Send")
             .disabled(
                 vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || vm.state == .thinking
@@ -390,25 +401,38 @@ private struct MessageBubble: View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
             HStack {
                 if message.role == .user { Spacer(minLength: 40) }
-                Text(message.text.isEmpty ? " " : message.text)
-                    .font(PanelTypography.body(settings))
-                    .foregroundStyle(message.role == .user ? Color.white : tokens.textPrimary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        message.role == .user
-                            ? tokens.accent
-                            : tokens.cardSurface,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(
-                                message.role == .user ? Color.clear : tokens.cardBorder,
-                                lineWidth: 1
-                            )
-                    )
+                // Error messages show a warning glyph prefix and use danger color.
+                Group {
+                    if message.isError {
+                        Label(message.text.isEmpty ? " " : message.text,
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(PanelTypography.body(settings))
+                            .foregroundStyle(Color(nsColor: .systemOrange))
+                    } else {
+                        Text(message.text.isEmpty ? " " : message.text)
+                            .font(PanelTypography.body(settings))
+                            .foregroundStyle(message.role == .user
+                                ? (tokens.isDark ? Color.white : Color(nsColor: .labelColor).opacity(0.9))
+                                : tokens.textPrimary)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    message.role == .user
+                        ? tokens.accent
+                        : (message.isError ? Color(nsColor: .systemOrange).opacity(0.08) : tokens.cardSurface),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(
+                            message.isError ? Color(nsColor: .systemOrange).opacity(0.4)
+                                : (message.role == .user ? Color.clear : tokens.cardBorder),
+                            lineWidth: 1
+                        )
+                )
                 if message.role == .assistant { Spacer(minLength: 40) }
             }
             // Tool activity notices (assistant turns only).
@@ -442,6 +466,9 @@ struct ToolConfirmationSheet: View {
     let onAllow: () -> Void
     let onDeny: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
+    private var tokens: ThemeTokens { settings.theme }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Tool Confirmation Required", systemImage: "exclamationmark.shield")
@@ -457,7 +484,11 @@ struct ToolConfirmationSheet: View {
             }
             .padding(8)
             .frame(maxHeight: 200)
-            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(tokens.cardBorder, lineWidth: 1)
+            )
             HStack {
                 Button("Deny", role: .cancel) { onDeny() }
                     .keyboardShortcut(.escape, modifiers: [])
@@ -468,6 +499,6 @@ struct ToolConfirmationSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 440)
+        .frame(minWidth: 400, idealWidth: 440)
     }
 }

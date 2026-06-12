@@ -356,8 +356,7 @@ final class AIAgentLoopTests: XCTestCase {
         let result = try await AIAgent.completeWithTools(
             messages: [AIMessage(role: .user, content: "hello")],
             provider: provider,
-            tools: [],
-            confirm: { _ in true }
+            tools: []
         )
         XCTAssertEqual(result, "final answer")
         XCTAssertEqual(provider.callCount, 1)
@@ -375,8 +374,7 @@ final class AIAgentLoopTests: XCTestCase {
         let result = try await AIAgent.completeWithTools(
             messages: [AIMessage(role: .user, content: "use the tool")],
             provider: provider,
-            tools: [tool],
-            confirm: { _ in true }
+            tools: [tool]
         )
         XCTAssertEqual(result, "all done")
         XCTAssertEqual(tool.invocations.count, 1)
@@ -419,8 +417,7 @@ final class AIAgentLoopTests: XCTestCase {
         let result = try await AIAgent.completeWithTools(
             messages: [AIMessage(role: .user, content: "run gated")],
             provider: provider,
-            tools: [gated],
-            confirm: { _ in false }
+            tools: [gated]
         )
         XCTAssertEqual(result, "understood")
         XCTAssertFalse(gated.didRun, "Tool body must not execute when confirmation is denied.")
@@ -441,8 +438,7 @@ final class AIAgentLoopTests: XCTestCase {
         let _ = try await AIAgent.completeWithTools(
             messages: [AIMessage(role: .user, content: "go")],
             provider: provider,
-            tools: [tool],
-            confirm: { _ in true }
+            tools: [tool]
         )
         XCTAssertLessThanOrEqual(tool.invocations.count, AIAgent.maxRounds,
                                   "Tool must not be invoked more than maxRounds times.")
@@ -473,8 +469,7 @@ final class AIAgentLoopTests: XCTestCase {
         _ = try await AIAgent.completeWithTools(
             messages: [AIMessage(role: .user, content: "start")],
             provider: provider,
-            tools: [tool],
-            confirm: { _ in true }
+            tools: [tool]
         )
 
         // Second call to the provider must include a message carrying the tool result.

@@ -126,7 +126,7 @@ struct CategorySidePane: View {
     private var onePasswordRow: some View {
         sidePaneRow(
             isSelected: selection == .onePassword,
-            tint: Color(nsColor: .systemBlue),
+            tint: tokens.accent,
             icon: { Image(systemName: "key.fill").font(.system(size: 12, weight: .semibold)) },
             title: "1Password",
             count: nil,

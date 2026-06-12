@@ -55,18 +55,16 @@ enum AIAgent {
     /// - Parameters:
     ///   - messages:  Initial conversation messages.
     ///   - provider:  An `AIAgentProvider` (wraps a real or mock backend).
-    ///   - tools:     Tools available to the model.
+    ///   - tools:     Tools available to the model. Individual tools that require
+    ///                confirmation (RunScriptTool, ExecuteCodeTool) carry their own
+    ///                `confirmHook`; there is no separate gate at the agent-loop level.
     ///   - options:   Temperature / maxTokens forwarded to each provider call.
-    ///   - confirm:   Async hook called before any tool execution. Return `true`
-    ///                to allow, `false` to deny (the loop reports the denial to
-    ///                the model and continues).
     /// - Returns: The model's final text answer.
     static func completeWithTools(
         messages initialMessages: [AIMessage],
         provider: AIAgentProvider,
         tools: [AITool],
-        options: AICompletionOptions = AICompletionOptions(),
-        confirm: @escaping (String) async -> Bool
+        options: AICompletionOptions = AICompletionOptions()
     ) async throws -> String {
         var messages = initialMessages
         var round = 0

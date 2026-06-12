@@ -31,10 +31,13 @@ struct OnePasswordView: View {
         .onAppear { reload() }
     }
 
+    private var tokens: ThemeTokens { settings.theme }
+
     private var header: some View {
         HStack {
             Label("1Password \u{00B7} \(settings.onePasswordVault)", systemImage: "key.fill")
-                .font(.headline)
+                .font(PanelTypography.body(settings).weight(.semibold))
+                .foregroundStyle(tokens.textPrimary)
             Spacer()
             Button { creating.toggle() } label: { Image(systemName: "plus") }
                 .help("New secret")
@@ -90,7 +93,11 @@ struct OnePasswordView: View {
             }
         }
         .padding(8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(tokens.cardBorder, lineWidth: 1)
+        )
     }
 
     // MARK: - Item row (collapsed)
@@ -104,7 +111,7 @@ struct OnePasswordView: View {
                 Image(systemName: "lock.doc").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
-                    Text(item.category.capitalized).font(.caption2).foregroundStyle(.secondary)
+                    Text(item.category.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -115,8 +122,8 @@ struct OnePasswordView: View {
             .padding(.horizontal, 6)
             .background(
                 isExpanded
-                    ? Color.accentColor.opacity(0.10)
-                    : Color.secondary.opacity(0.06),
+                    ? tokens.accent.opacity(0.10)
+                    : tokens.cardBorder.opacity(0.15),
                 in: RoundedRectangle(cornerRadius: 6)
             )
         }
@@ -170,8 +177,8 @@ struct OnePasswordView: View {
     private func message(_ title: String, detail: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: "key.slash").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
-            Text(title).font(.headline)
-            Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(title).font(PanelTypography.body(settings).weight(.semibold))
+            Text(detail).font(PanelTypography.metadata(settings)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)

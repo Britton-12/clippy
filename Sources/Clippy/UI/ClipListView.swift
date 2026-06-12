@@ -480,8 +480,8 @@ struct ClipListView: View {
         case .history: return "clipboard"
         case .category: return "tray"
         case .onePassword: return "key.fill"
-        case .scripts: return "terminal"
-        case .assistant: return "sparkles"
+        // .scripts and .assistant route to their own views; unreachable here.
+        case .scripts, .assistant: return "tray"
         }
     }
 
@@ -496,9 +496,8 @@ struct ClipListView: View {
             return "No clips in this category yet. Right-click a clip and choose Categories, or drag a card onto the category."
         case .onePassword:
             return "No secrets shared to Clippy yet."
-        case .scripts:
-            return "No scripts yet."
-        case .assistant:
+        // .scripts and .assistant route to their own views; unreachable here.
+        case .scripts, .assistant:
             return ""
         }
     }
@@ -508,6 +507,8 @@ struct ClipListView: View {
             keyHint("\u{21A9}", settings.pastePlainTextByDefault ? "paste plain" : "paste")
             keyHint("\u{21E7}\u{21A9}", settings.pastePlainTextByDefault ? "formatted" : "plain")
             keyHint("\u{2318}P", "pin")
+            keyHint("\u{2318}E", "edit")
+            keyHint("\u{2318}\u{232B}", "delete")
             keyHint("\u{238B}", "close")
             Spacer()
         }
@@ -519,7 +520,10 @@ struct ClipListView: View {
     private func keyHint(_ key: String, _ action: String) -> some View {
         HStack(spacing: 5) {
             Text(key)
-                .font(PanelTypography.metadata(settings).weight(.semibold))
+                // Use an explicit system font so key glyphs always render at the
+                // correct weight, regardless of any custom font family chosen in
+                // user appearance settings.
+                .font(.system(size: 11, weight: .semibold, design: .default))
                 .foregroundStyle(tokens.textPrimary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
