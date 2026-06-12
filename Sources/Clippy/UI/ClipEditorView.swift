@@ -100,6 +100,11 @@ private struct TextClipEditor: View {
         case .title: title = proposal.proposed
         case .rewrite, .summary, .newClip: text = proposal.proposed
         case .category: break
+        case .copyToClipboard:
+            // The ClipListView handler already wrote to NSPasteboard; nothing
+            // to do in the editor. The case must be handled to keep the switch
+            // exhaustive as Kind grows.
+            break
         }
     }
 

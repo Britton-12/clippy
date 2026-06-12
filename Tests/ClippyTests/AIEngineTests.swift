@@ -226,6 +226,65 @@ final class AIServiceRunActionTests: XCTestCase {
         XCTAssertEqual(proposal.kind, .rewrite)
         XCTAssertEqual(proposal.original, "original")
     }
+
+    func testRunActionCopyToClipboardMapsToCorrectKind() async throws {
+        let mock = MockAIProvider(response: "clipboard result")
+        let service = AIService(provider: mock)
+        let action = AIAction(
+            id: UUID(), name: "Translate", symbolName: "globe",
+            promptTemplate: "Translate {clip} to French.",
+            temperature: 0.3, maxTokens: 512,
+            outputDisposition: .copyToClipboard, isBuiltIn: false
+        )
+        let proposal = try await service.run(action: action, on: "hello world")
+        XCTAssertEqual(proposal.kind, .copyToClipboard,
+                       "copyToClipboard disposition must produce .copyToClipboard kind, not .rewrite")
+        XCTAssertEqual(proposal.proposed, "clipboard result")
+        // Source clip reference is still populated so callers can inspect it.
+        XCTAssertEqual(proposal.original, "hello world")
+    }
+
+    func testRunActionCopyToClipboardNeverProducesRewriteKind() async throws {
+        let mock = MockAIProvider(response: "output")
+        let service = AIService(provider: mock)
+        let action = AIAction(
+            id: UUID(), name: "Copy Action", symbolName: "doc.on.doc",
+            promptTemplate: "{clip}",
+            temperature: 0.5, maxTokens: 256,
+            outputDisposition: .copyToClipboard, isBuiltIn: false
+        )
+        let proposal = try await service.run(action: action, on: "source text")
+        XCTAssertNotEqual(proposal.kind, .rewrite,
+                          "copyToClipboard must never collapse to .rewrite (data-loss bug guard)")
+        XCTAssertNotEqual(proposal.kind, .newClip,
+                          "copyToClipboard must never collapse to .newClip")
+    }
+
+    func testAllThreeDispositionsMappedDistinctly() async throws {
+        // Proves each AIActionOutputDisposition maps to its own unique AIProposal.Kind.
+        let mock = MockAIProvider(response: "x")
+        let service = AIService(provider: mock)
+
+        func proposal(for disposition: AIActionOutputDisposition) async throws -> AIProposal.Kind {
+            let action = AIAction(id: UUID(), name: "A", symbolName: "star",
+                                  promptTemplate: "{clip}", temperature: 0.3, maxTokens: 64,
+                                  outputDisposition: disposition, isBuiltIn: false)
+            return try await service.run(action: action, on: "text").kind
+        }
+
+        let proposeKind = try await proposal(for: .proposeEdit)
+        let newClipKind  = try await proposal(for: .newClip)
+        let copyKind     = try await proposal(for: .copyToClipboard)
+
+        XCTAssertEqual(proposeKind, .rewrite)
+        XCTAssertEqual(newClipKind,  .newClip)
+        XCTAssertEqual(copyKind,     .copyToClipboard)
+
+        // All three are distinct — no two dispositions collapse to the same kind.
+        XCTAssertNotEqual(proposeKind, newClipKind)
+        XCTAssertNotEqual(proposeKind, copyKind)
+        XCTAssertNotEqual(newClipKind,  copyKind)
+    }
 }
 
 // MARK: - Tool registry serialization tests

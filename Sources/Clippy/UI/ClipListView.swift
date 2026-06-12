@@ -420,6 +420,22 @@ struct ClipListView: View {
         case .newClip:
             // newClip disposition: insert as a fresh history entry.
             store.saveScriptOutput(text)
+        case .copyToClipboard:
+            // copyToClipboard disposition: write result to NSPasteboard without
+            // touching the source clip, then show a brief status banner.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            showStatusBanner("Copied to clipboard")
+        }
+    }
+
+    /// Show `message` in the OCR-style status banner for ~2 seconds.
+    private func showStatusBanner(_ message: String) {
+        ocrStatusMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if ocrStatusMessage == message {
+                ocrStatusMessage = nil
+            }
         }
     }
 

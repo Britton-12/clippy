@@ -9,6 +9,8 @@ struct AIProposal: Equatable {
         case category
         case summary
         case newClip
+        /// Result should be written to NSPasteboard; source clip is not modified.
+        case copyToClipboard
     }
     let kind: Kind
     let label: String
@@ -112,7 +114,12 @@ final class AIService {
             AIMessage(role: .user, content: userPrompt),
         ], options: AICompletionOptions(temperature: action.temperature, maxTokens: action.maxTokens))
         let trimmed = Self.trim(out)
-        let kind: AIProposal.Kind = action.outputDisposition == .newClip ? .newClip : .rewrite
+        let kind: AIProposal.Kind
+        switch action.outputDisposition {
+        case .newClip:          kind = .newClip
+        case .copyToClipboard:  kind = .copyToClipboard
+        case .proposeEdit:      kind = .rewrite
+        }
         return AIProposal(kind: kind, label: action.name, original: clipText, proposed: trimmed)
     }
 

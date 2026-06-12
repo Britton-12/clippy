@@ -710,7 +710,7 @@ private struct AISettingsTab: View {
                     .foregroundStyle(.secondary)
                 Toggle("Allow AI to execute generated code", isOn: $settings.aiAgentAllowCodeExecution)
                     .disabled(!settings.aiEnabled)
-                Text("When on, the AI Assistant can write and execute code in a sandboxed subprocess. You will be shown the code and asked to confirm before it runs. Both options are off by default.")
+                Text("When on, the AI Assistant can write and execute code. The code runs as you with full environment access and a 30-second timeout. You will be shown the code and asked to confirm before each run. Both options are off by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
