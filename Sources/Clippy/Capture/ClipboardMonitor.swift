@@ -123,7 +123,7 @@ final class ClipboardMonitor {
             playCaptureSound()
             maybeAutoSuggestTitle(forText: text)
         } catch {
-            NSLog("Clippy: failed to save clip: \(error)")
+            ClippyLog.error("Failed to save clip: \(error)", category: ClippyLog.capture)
         }
     }
 
@@ -176,7 +176,7 @@ final class ClipboardMonitor {
             try database.saveCapturedImageClip(&clip, cap: AppSettings.shared.maxHistoryItems)
             playCaptureSound()
         } catch {
-            NSLog("Clippy: failed to save image clip: \(error)")
+            ClippyLog.error("Failed to save image clip: \(error)", category: ClippyLog.capture)
         }
     }
 

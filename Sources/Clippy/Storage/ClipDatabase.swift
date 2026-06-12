@@ -171,6 +171,11 @@ final class ClipDatabase {
             var inserting = newClip
             try inserting.insert(db)
             evicted = try Self.evictOverCap(db, cap: cap)
+            // Absolute ceiling: if total rows still exceed the hard limit after
+            // the normal cap eviction (because categorized clips are exempt from
+            // the cap), delete the oldest categorized clips beyond that ceiling
+            // too. This prevents unbounded growth when users heavily categorize.
+            evicted += try Self.evictAbsoluteCeiling(db)
         }
         media.delete(filenames: evicted)
     }
@@ -202,6 +207,42 @@ final class ClipDatabase {
                 """
         )
         try db.execute(sql: "DELETE FROM clips WHERE id IN (\(doomedSQL))")
+        return filenames
+    }
+
+    /// Hard ceiling across ALL clips (including categorized) so the table can
+    /// never grow without bound even when every clip is in a category and the
+    /// normal cap eviction leaves them all in place.
+    /// Evicts the oldest clips beyond the ceiling and returns their media filenames.
+    private static let absoluteClipCeiling = 10_000
+
+    @discardableResult
+    static func evictAbsoluteCeiling(_ db: Database) throws -> [String] {
+        let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clips") ?? 0
+        guard total > absoluteClipCeiling else { return [] }
+
+        let excess = total - absoluteClipCeiling
+        // Delete the oldest clips (by createdAt) regardless of category membership.
+        let ceilingDoomedSQL = """
+            SELECT id FROM clips
+            ORDER BY createdAt ASC, id ASC
+            LIMIT \(excess)
+            """
+        let filenames = try String.fetchAll(
+            db,
+            sql: """
+                SELECT mediaFilename FROM clips
+                WHERE mediaFilename IS NOT NULL AND id IN (\(ceilingDoomedSQL))
+                UNION ALL
+                SELECT thumbFilename FROM clips
+                WHERE thumbFilename IS NOT NULL AND id IN (\(ceilingDoomedSQL))
+                """
+        )
+        try db.execute(sql: "DELETE FROM clips WHERE id IN (\(ceilingDoomedSQL))")
+        if excess > 0 {
+            ClippyLog.info("Absolute ceiling eviction: removed \(excess) clips (total was \(total))",
+                           category: ClippyLog.storage)
+        }
         return filenames
     }
 

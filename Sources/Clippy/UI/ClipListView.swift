@@ -10,6 +10,8 @@ struct ClipListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let onPaste: (Clip, Bool) -> Void
+    let onPrimary: (Clip) -> Void
+    let onSendKeystrokes: (Clip) -> Void
     let onEdit: (Clip) -> Void
     let onClose: () -> Void
     let onOpenSettings: () -> Void
@@ -28,6 +30,9 @@ struct ClipListView: View {
     /// there is one confirmation entry point and deletion is never destructive
     /// without a prompt.
     @State private var clipPendingDeletion: Clip?
+    /// The clip waiting for the user to confirm a large keystroke action. Nil
+    /// when the clip is below the warn threshold or no action is pending.
+    @State private var clipPendingKeystrokes: Clip?
     @FocusState private var searchFocused: Bool
     /// AI runner used by the context-menu AI submenu.
     @StateObject private var aiRunner = AIActionRunner()
@@ -107,12 +112,39 @@ struct ClipListView: View {
         } message: { _ in
             Text("This permanently removes the clip from your history.")
         }
+        // Confirmation gate for large keystroke actions so an accidental click
+        // does not type thousands of characters into the active app.
+        .alert(
+            "Type as keystrokes?",
+            isPresented: Binding(
+                get: { clipPendingKeystrokes != nil },
+                set: { if !$0 { clipPendingKeystrokes = nil } }
+            ),
+            presenting: clipPendingKeystrokes
+        ) { clip in
+            Button("Type \(clip.contentText.count.formatted()) characters", role: .destructive) {
+                onSendKeystrokes(clip)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { clip in
+            Text("This will type the clip into the active app character by character.")
+        }
     }
 
     /// Stages a clip for deletion behind the confirmation alert. All delete
     /// entry points call this instead of store.delete directly.
     private func requestDelete(_ clip: Clip) {
         clipPendingDeletion = clip
+    }
+
+    /// Routes a "send keystrokes" request through a confirmation dialog when
+    /// the clip exceeds the warn threshold, otherwise fires immediately.
+    private func requestSendKeystrokes(_ clip: Clip) {
+        if clip.contentText.count > settings.keystrokeWarnThreshold {
+            clipPendingKeystrokes = clip
+        } else {
+            onSendKeystrokes(clip)
+        }
     }
 
     /// Side pane takes a quarter of the panel but never less than 150pt.
@@ -337,15 +369,16 @@ struct ClipListView: View {
                 get: { renamingClipID == clip.id },
                 set: { active in renamingClipID = active ? clip.id : nil }
             ),
+            onActivate: { onPrimary(clip) },
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
+            onSendKeystrokes: { requestSendKeystrokes(clip) },
             onEdit: { onEdit(clip) },
             onTogglePin: { store.togglePin(clip) },
             onDelete: { requestDelete(clip) },
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
-        .onTapGesture { onPaste(clip, settings.pastePlainTextByDefault) }
         .draggable(String(clip.id ?? -1))
         .contextMenu {
             Button("Paste") { onPaste(clip, false) }
@@ -414,7 +447,12 @@ struct ClipListView: View {
                     Button {
                         runAIAction(action, on: clip)
                     } label: {
-                        Label(action.name, systemImage: action.symbolName)
+                        // Use ActionIconView so emoji/appLogo icons render correctly.
+                        // SwiftUI menus accept any label content, not just Label().
+                        HStack {
+                            ActionIconView(kind: action.iconKind, value: action.symbolName)
+                            Text(action.name)
+                        }
                     }
                 }
                 if actions.isEmpty {
@@ -575,8 +613,13 @@ struct ClipListView: View {
 
     private func pasteSelected(shiftHeld: Bool) {
         guard let clip = selectedClip else { return }
-        // Shift inverts whichever paste mode is the configured default.
-        let asPlainText = settings.pastePlainTextByDefault != shiftHeld
-        onPaste(clip, asPlainText)
+        if shiftHeld {
+            // Shift+Return always inverts the default paste mode (explicit paste).
+            let asPlainText = settings.pastePlainTextByDefault != shiftHeld
+            onPaste(clip, asPlainText)
+        } else {
+            // Plain Return follows the primary action (respects copy-only toggle).
+            onPrimary(clip)
+        }
     }
 }

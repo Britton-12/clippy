@@ -74,8 +74,10 @@ final class ICloudSyncService: ObservableObject {
             let toml = try ClippyArchive.exportTOML(from: ClipDatabase.shared)
             try toml.write(to: url, atomically: true, encoding: .utf8)
             status = "Synced via iCloud Drive."
+            ClippyLog.info("iCloud sync succeeded", category: ClippyLog.sync)
         } catch {
             status = "Sync failed: \(error.localizedDescription)"
+            ClippyLog.error("iCloud sync failed: \(error)", category: ClippyLog.sync)
         }
     }
 

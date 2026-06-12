@@ -176,21 +176,47 @@ enum ClippyArchive {
         "  " + pair(key, value, width: 11)
     }
 
-    /// TOML string literal. Uses a multi-line basic string for values that
-    /// contain newlines (clip text often does) and escapes the rest.
+    /// TOML basic string literal with full escaping.
+    ///
+    /// Always emits a single-line basic string delimited by `"..."`.  All
+    /// content that would be invalid or ambiguous in a TOML basic string is
+    /// escaped using the standard TOML escape sequences, so the result is
+    /// valid for any arbitrary Unicode text including multi-line content,
+    /// triple-quote sequences, control characters, and NUL bytes.
+    ///
+    /// Escape order matters: backslash must be doubled before any other
+    /// sequence is substituted, otherwise the newly-inserted backslashes
+    /// would themselves be double-escaped.
     private static func quote(_ string: String) -> String {
-        if string.contains("\n") {
-            var body = string.replacingOccurrences(of: "\\", with: "\\\\")
-            body = body.replacingOccurrences(of: "\"\"\"", with: "\"\"\\\"")
-            // The newline right after the opening delimiter is trimmed by TOML,
-            // so the content starts cleanly on its own line.
-            return "\"\"\"\n\(body)\"\"\""
-        }
-        var body = string.replacingOccurrences(of: "\\", with: "\\\\")
+        var body = string
+
+        // 1. Backslash must come first.
+        body = body.replacingOccurrences(of: "\\", with: "\\\\")
+
+        // 2. Double-quote (the delimiter).
         body = body.replacingOccurrences(of: "\"", with: "\\\"")
-        body = body.replacingOccurrences(of: "\t", with: "\\t")
-        body = body.replacingOccurrences(of: "\r", with: "\\r")
-        return "\"\(body)\""
+
+        // 3. Named TOML escape sequences for common control characters.
+        body = body.replacingOccurrences(of: "\u{08}", with: "\\b")
+        body = body.replacingOccurrences(of: "\t",     with: "\\t")
+        body = body.replacingOccurrences(of: "\n",     with: "\\n")
+        body = body.replacingOccurrences(of: "\u{0C}", with: "\\f")
+        body = body.replacingOccurrences(of: "\r",     with: "\\r")
+
+        // 4. Remaining control characters (< U+0020, and U+007F) that have
+        //    no named escape are encoded as \uXXXX (4 uppercase hex digits).
+        var result = ""
+        result.reserveCapacity(body.unicodeScalars.count)
+        for scalar in body.unicodeScalars {
+            let v = scalar.value
+            if v < 0x20 || v == 0x7F {
+                result += String(format: "\\u%04X", v)
+            } else {
+                result.unicodeScalars.append(scalar)
+            }
+        }
+
+        return "\"\(result)\""
     }
 
     // MARK: Import

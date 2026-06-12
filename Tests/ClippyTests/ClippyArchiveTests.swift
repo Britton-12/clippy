@@ -107,4 +107,83 @@ final class ClippyArchiveTests: XCTestCase {
         XCTAssertEqual(CategoryIconKind.fromTOML("emoji"), .emoji)
         XCTAssertEqual(CategoryIconKind.fromTOML("anything"), .symbol)
     }
+
+    // MARK: - quote() hostile-input round-trip tests
+
+    /// Verifies that exportTOML -> importTOML preserves clip text byte-for-byte
+    /// for every class of input that previously broke the hand-written TOML emitter.
+    func testQuoteHostileInputRoundTrip() throws {
+        let cases: [(label: String, text: String)] = [
+            // Text ending in a double quote fuses with a closing """ delimiter.
+            ("ends with double quote",        "He said \"hi\""),
+            // Triple quotes inside the body terminate a multi-line string early.
+            ("contains triple quotes",        "a \"\"\" b"),
+            // Windows line endings: bare \r before \n must not become two newlines.
+            ("windows line endings",          "line1\r\nline2"),
+            // Tab and backslash (backslash must be doubled, tab escaped).
+            ("tab and backslash",             "col1\tcol2\\path"),
+            // Bell control character (0x07).
+            ("bell control char",             "bell\u{07}end"),
+            // NUL byte (0x00) -- invalid in raw TOML unless escaped.
+            ("nul byte",                      "\u{00}x"),
+            // Emoji + genuine multi-line content.
+            ("emoji multiline",               "😀 first\nsecond line\n"),
+            // String that ends with a backslash.
+            ("ends with backslash",           "ends with backslash\\"),
+            // String whose body contains two consecutive double quotes (not three).
+            ("two consecutive double quotes", "a \"\" b"),
+            // All standard single-line escapes together.
+            ("mixed escapes single line",     "tab:\t back:\\ cr:\r quote:\""),
+        ]
+
+        for (label, text) in cases {
+            // Build a minimal archive with just a Pinned category and one clip.
+            let db = try makeTestDatabase(self)
+            var clip = makeTextClip(text)
+            try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
+            let clipID = try XCTUnwrap(
+                db.allClips().first { $0.contentText == text }?.id,
+                "Could not find saved clip for case: \(label)"
+            )
+            // Pin it into the default Pinned category.
+            let pinned = try XCTUnwrap(db.categories().first, "No categories in DB for case: \(label)")
+            let pinnedID = try XCTUnwrap(pinned.id)
+            try db.setClip(clipID, inCategory: pinnedID, true)
+
+            // Export.
+            let toml = try ClippyArchive.exportTOML(from: db)
+
+            // Import into a fresh DB.
+            let dest = try makeTestDatabase(self)
+            _ = try ClippyArchive.importTOML(toml, into: dest)
+
+            // The exact text must survive the round trip.
+            let recovered = try dest.allClips().compactMap { $0.contentText }
+            XCTAssertTrue(
+                recovered.contains(text),
+                "Round-trip failed for case '\(label)'. TOML was:\n\(toml)"
+            )
+        }
+    }
+
+    /// Title strings go through quote() too; verify they round-trip as well.
+    func testQuoteHostileInputInTitle() throws {
+        let hostileTitle = "He said \"\"\" and \\ then\ttabbed\r\nand NUL:\u{00}done"
+
+        let db = try makeTestDatabase(self)
+        var clip = makeTextClip("content")
+        try db.saveCapturedClip(&clip, cap: AppSettings.shared.maxHistoryItems)
+        let clipID = try XCTUnwrap(db.allClips().first?.id)
+        let pinned = try XCTUnwrap(db.categories().first)
+        let pinnedID = try XCTUnwrap(pinned.id)
+        try db.setClip(clipID, inCategory: pinnedID, true)
+        try db.updateClipTitle(id: clipID, userTitle: hostileTitle)
+
+        let toml = try ClippyArchive.exportTOML(from: db)
+        let dest = try makeTestDatabase(self)
+        _ = try ClippyArchive.importTOML(toml, into: dest)
+
+        let recovered = try XCTUnwrap(dest.allClips().first { $0.contentText == "content" })
+        XCTAssertEqual(recovered.userTitle, hostileTitle)
+    }
 }

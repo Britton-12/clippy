@@ -108,6 +108,7 @@ final class AIAssistantViewModel: ObservableObject {
                 self.messages[assistantIndex].text = answer
                 self.state = .ready
             } catch {
+                ClippyLog.error("AI agent error: \(error)", category: ClippyLog.ai)
                 self.messages[assistantIndex].text = error.localizedDescription
                 self.messages[assistantIndex].isError = true
                 self.state = .ready

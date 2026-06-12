@@ -51,7 +51,7 @@ final class ClipStore: ObservableObject {
             in: database.dbQueue,
             scheduling: .immediate,
             onError: { error in
-                NSLog("Clippy: clip observation failed: \(error)")
+                ClippyLog.error("Clip observation failed: \(error)", category: ClippyLog.storage)
             },
             onChange: { [weak self] clips in
                 self?.recents = clips
@@ -67,13 +67,31 @@ final class ClipStore: ObservableObject {
             in: database.dbQueue,
             scheduling: .async(onQueue: .main),
             onError: { error in
-                NSLog("Clippy: category observation failed: \(error)")
+                ClippyLog.error("Category observation failed: \(error)", category: ClippyLog.storage)
             },
             onChange: { [weak self] categories, map in
                 self?.categories = categories
                 self?.membership = map
             }
         )
+    }
+
+    // MARK: - Memory pressure
+
+    /// Drop the in-memory clip array back to a small resident window so the OS
+    /// can reclaim the Swift heap during a critical memory-pressure event. The
+    /// DB is the source of truth; the GRDB observation will repopulate `recents`
+    /// on the next write (which clears the pressure anyway). Safe to call from
+    /// the main thread only.
+    func trimResident() {
+        // Keep only the 50 most-recent clips resident; categorized clips that
+        // fall outside the window will reappear on the next DB observation pulse.
+        let trimLimit = 50
+        if recents.count > trimLimit {
+            recents = Array(recents.prefix(trimLimit))
+            ClippyLog.info("trimResident: reduced resident clips to \(trimLimit)",
+                           category: ClippyLog.storage)
+        }
     }
 
     // MARK: - Derived data

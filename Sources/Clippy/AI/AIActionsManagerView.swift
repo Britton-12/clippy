@@ -104,8 +104,7 @@ struct AIActionsManagerView: View {
 
     private func actionRow(_ action: AIAction) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: action.symbolName)
-                .font(.system(size: 13))
+            ActionIconView(kind: action.iconKind, value: action.symbolName)
                 .frame(width: 20)
                 .foregroundStyle(tokens.textSecondary)
             VStack(alignment: .leading, spacing: 2) {
@@ -180,6 +179,7 @@ struct AIActionEditorView: View {
 
     // Local form state
     @State private var name: String
+    @State private var iconKind: CategoryIconKind
     @State private var symbolName: String
     @State private var promptTemplate: String
     @State private var temperature: Double
@@ -195,6 +195,7 @@ struct AIActionEditorView: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _name = State(initialValue: action?.name ?? "")
+        _iconKind = State(initialValue: action?.iconKind ?? .symbol)
         _symbolName = State(initialValue: action?.symbolName ?? "wand.and.sparkles")
         _promptTemplate = State(initialValue: action?.promptTemplate ?? "")
         _temperature = State(initialValue: action?.temperature ?? 0.4)
@@ -226,16 +227,16 @@ struct AIActionEditorView: View {
             Form {
                 Section("Name and Icon") {
                     TextField("Action name", text: $name)
-                    HStack(spacing: 8) {
-                        Image(systemName: symbolName)
-                            .frame(width: 20, height: 20)
-                            .foregroundStyle(.secondary)
-                        TextField("SF Symbol name", text: $symbolName,
-                                  prompt: Text("e.g. wand.and.sparkles"))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            ActionIconView(kind: iconKind, value: symbolName)
+                                .foregroundStyle(.secondary)
+                            Text("Icon")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        IconPickerView(iconKind: $iconKind, iconValue: $symbolName)
                     }
-                    Text("Enter any SF Symbol name. Preview updates instantly.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section {
@@ -290,11 +291,18 @@ struct AIActionEditorView: View {
     }
 
     private func save() {
+        // Ensure a fallback symbol value so `.symbol` kind never renders a blank icon.
+        let resolvedValue: String
+        if iconKind == .symbol && symbolName.trimmingCharacters(in: .whitespaces).isEmpty {
+            resolvedValue = "wand.and.sparkles"
+        } else {
+            resolvedValue = symbolName
+        }
         let action = AIAction(
             id: initial?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
-            symbolName: symbolName.trimmingCharacters(in: .whitespaces).isEmpty
-                ? "wand.and.sparkles" : symbolName.trimmingCharacters(in: .whitespaces),
+            iconKind: iconKind,
+            symbolName: resolvedValue,
             promptTemplate: promptTemplate,
             temperature: temperature,
             maxTokens: maxTokens,

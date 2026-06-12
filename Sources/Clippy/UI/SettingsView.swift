@@ -238,6 +238,30 @@ private struct GeneralSettingsTab: View {
                 Text("Shift+Return in the panel always pastes in the non-default mode.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle("Clicking a clip copies it without pasting", isOn: $settings.clickCopyOnly)
+                Text("Off by default: clicking pastes into the active app. Turn on to only copy to the clipboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Keystroke typing speed", selection: $settings.keystrokeSpeed) {
+                    ForEach(KeystrokeSpeed.allCases) { speed in
+                        Text(speed.label).tag(speed)
+                    }
+                }
+                Text(settings.keystrokeSpeed.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Stepper(
+                    "Confirm before typing more than \(settings.keystrokeWarnThreshold) characters",
+                    value: $settings.keystrokeWarnThreshold,
+                    in: 200...20000,
+                    step: 200
+                )
+                Text("The \"Send as keystrokes\" action prompts before typing a clip this long.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("History") {
@@ -762,10 +786,15 @@ private struct CaptureSettingsTab: View {
 
 private struct AISettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var mcpController = McpServerController.shared
     @State private var apiKey = ""
     @State private var keyStatus = ""
     @State private var testResult: String?
     @State private var testing = false
+    @State private var mcpTestResult: String?
+    @State private var mcpTesting = false
+    @State private var mcpInstallResult: String?
+    @State private var mcpInstalledClients: Set<McpClient> = []
 
     var body: some View {
         Form {
@@ -807,6 +836,17 @@ private struct AISettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Divider()
+                HStack(spacing: 8) {
+                    Button(testing ? "Testing..." : "Test AI connection") { test() }
+                        .disabled(testing || !settings.aiEnabled)
+                    if let testResult {
+                        Text(testResult)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
             }
 
             Section("Automation") {
@@ -836,54 +876,96 @@ private struct AISettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("MCP Integration") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Bundled MCP Server", systemImage: "network")
-                        .font(.callout.weight(.semibold))
-                    Text("Clippy ships a bundled MCP server (clippy-mcp) that lets external AI agents, such as Claude Desktop, read and search your clips via the Model Context Protocol.")
+            Section("MCP integration") {
+                Toggle("Enable Clippy MCP server", isOn: $settings.mcpEnabled)
+                Text("Runs a local server so AI tools (Claude, Copilot) can read and search your clips.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Port") {
+                    HStack(spacing: 8) {
+                        TextField("Port", value: $settings.mcpPort, format: .number)
+                            .frame(width: 70)
+                            .multilineTextAlignment(.trailing)
+                        let portFree = mcpController.isPortFree(settings.mcpPort)
+                        Label(portFree ? "Port \(settings.mcpPort) is available"
+                                       : "Port \(settings.mcpPort) is in use",
+                              systemImage: portFree ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(portFree ? Color.green : Color.orange)
+                    }
+                }
+                .disabled(!settings.mcpEnabled)
+
+                LabeledContent("Status") {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(mcpStatusColor)
+                            .frame(width: 8, height: 8)
+                        Text(mcpController.status.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            Section("Install for...") {
+                ForEach(McpClient.allCases) { client in
+                    HStack {
+                        if mcpInstalledClients.contains(client) {
+                            Label(client.displayName, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Label(client.displayName, systemImage: "circle")
+                        }
+                        Spacer()
+                        Button("Install") {
+                            let result = McpInstallService.install(client, port: settings.mcpPort)
+                            switch result {
+                            case .success(let msg):
+                                mcpInstallResult = msg
+                                refreshInstalledClients()
+                            case .failure(let err):
+                                mcpInstallResult = err.localizedDescription
+                            }
+                        }
+                        .disabled(!settings.mcpEnabled)
+                    }
+                }
+                if let mcpInstallResult {
+                    Text(mcpInstallResult)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Server path:")
-                        .font(.caption.weight(.medium))
-                    let mcpPath = (Bundle.main.bundlePath as NSString)
-                        .deletingLastPathComponent
-                        .appending("/integrations/clippy-mcp")
-                    Text(mcpPath)
-                        .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
-                        .foregroundStyle(.secondary)
-                    Text("Add to Claude Desktop config:")
-                        .font(.caption.weight(.medium))
-                        .padding(.top, 4)
-                    Text("""
-                        {
-                          "mcpServers": {
-                            "clippy": { "command": "node", "args": ["\(mcpPath)/index.js"] }
-                          }
-                        }
-                        """)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.1),
-                                    in: RoundedRectangle(cornerRadius: 6))
                 }
-                .padding(.vertical, 4)
+                if !settings.mcpEnabled {
+                    Text("Enable the MCP server above before installing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
-                Button(testing ? "Testing..." : "Test connection") { test() }
-                    .disabled(testing || !settings.aiEnabled)
-                if let testResult {
-                    Text(testResult)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                HStack(spacing: 8) {
+                    Button(mcpTesting ? "Testing..." : "Test MCP server") {
+                        mcpTest()
+                    }
+                    .disabled(mcpTesting || !mcpController.status.isRunning)
+                    if let mcpTestResult {
+                        Text(mcpTestResult)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
             }
         }
         .formStyle(.grouped)
-        .onAppear { refreshKeyStatus() }
+        .onAppear {
+            refreshKeyStatus()
+            refreshInstalledClients()
+        }
         .onChange(of: settings.aiProvider) { refreshKeyStatus() }
     }
 
@@ -904,6 +986,40 @@ private struct AISettingsTab: View {
     private func clearKey() {
         KeychainStore.shared.delete(account: settings.aiProvider.keychainAccount)
         refreshKeyStatus()
+    }
+
+    private var mcpStatusColor: Color {
+        switch mcpController.status {
+        case .running:   return .green
+        case .starting:  return .yellow
+        case .stopped:   return .secondary
+        case .portInUse: return .orange
+        case .failed:    return .red
+        }
+    }
+
+    private func refreshInstalledClients() {
+        var found = Set<McpClient>()
+        for client in McpClient.allCases {
+            if McpInstallService.isInstalled(client) { found.insert(client) }
+        }
+        mcpInstalledClients = found
+    }
+
+    private func mcpTest() {
+        mcpTesting = true
+        mcpTestResult = nil
+        McpServerController.shared.testConnection { result in
+            switch result {
+            case .success(let count):
+                mcpTestResult = count > 0
+                    ? "Connected. \(count) tool\(count == 1 ? "" : "s") available."
+                    : "Connected."
+            case .failure(let err):
+                mcpTestResult = err.localizedDescription
+            }
+            mcpTesting = false
+        }
     }
 
     private func test() {

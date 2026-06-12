@@ -19,6 +19,41 @@ enum PanelPositionMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Per-character pacing for the "send keystrokes" action. Faster feels instant
+/// but can drop characters in slow or remote targets; deliberate is the safest.
+enum KeystrokeSpeed: String, CaseIterable, Identifiable {
+    case fast
+    case balanced
+    case deliberate
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fast: return "Fast"
+        case .balanced: return "Balanced"
+        case .deliberate: return "Deliberate"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .fast: return "Near-instant (~2ms/char). May drop characters in remote or sluggish apps."
+        case .balanced: return "Reliable for everyday use (~6ms/char)."
+        case .deliberate: return "Visibly typed (~20ms/char). Maximum compatibility."
+        }
+    }
+
+    /// Delay between characters in microseconds, for usleep between key events.
+    var perCharDelayMicros: useconds_t {
+        switch self {
+        case .fast: return 2_000
+        case .balanced: return 6_000
+        case .deliberate: return 20_000
+        }
+    }
+}
+
 /// Every user-facing knob, persisted in UserDefaults. Views bind to this
 /// directly; services read it on each use so changes apply immediately.
 final class AppSettings: ObservableObject {
@@ -84,6 +119,13 @@ final class AppSettings: ObservableObject {
         static let onePasswordAutoClearDelaySecs = "onePasswordAutoClearDelaySecs"
         // iCloud sync
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
+        // Clip click + keystroke actions
+        static let clickCopyOnly = "clickCopyOnly"
+        static let keystrokeSpeed = "keystrokeSpeed"
+        static let keystrokeWarnThreshold = "keystrokeWarnThreshold"
+        // MCP integration
+        static let mcpEnabled = "mcpEnabled"
+        static let mcpPort = "mcpPort"
     }
 
     private let defaults: UserDefaults
@@ -275,6 +317,30 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(iCloudSyncEnabled, forKey: Keys.iCloudSyncEnabled) }
     }
 
+    /// When true, clicking a clip card only copies it to the clipboard. When
+    /// false (default), clicking also pastes into the frontmost app.
+    @Published var clickCopyOnly: Bool {
+        didSet { defaults.set(clickCopyOnly, forKey: Keys.clickCopyOnly) }
+    }
+    /// Per-character pacing for the "send keystrokes" action.
+    @Published var keystrokeSpeed: KeystrokeSpeed {
+        didSet { defaults.set(keystrokeSpeed.rawValue, forKey: Keys.keystrokeSpeed) }
+    }
+    /// Above this character count, "send keystrokes" asks for confirmation so an
+    /// accidental click does not type thousands of characters.
+    @Published var keystrokeWarnThreshold: Int {
+        didSet { defaults.set(keystrokeWarnThreshold, forKey: Keys.keystrokeWarnThreshold) }
+    }
+    /// Whether the bundled MCP server integration is presented as enabled.
+    @Published var mcpEnabled: Bool {
+        didSet { defaults.set(mcpEnabled, forKey: Keys.mcpEnabled) }
+    }
+    /// Preferred localhost port for the bundled MCP HTTP server. Clippy verifies
+    /// this port is free before binding and surfaces a conflict if it is not.
+    @Published var mcpPort: Int {
+        didSet { defaults.set(mcpPort, forKey: Keys.mcpPort) }
+    }
+
     /// The resolved token table for the active theme. Views read this.
     var theme: ThemeTokens { Theme.tokens(self) }
 
@@ -392,6 +458,11 @@ final class AppSettings: ObservableObject {
             Keys.onePasswordAutoClearClipboard: true,
             Keys.onePasswordAutoClearDelaySecs: 90,
             Keys.iCloudSyncEnabled: false,
+            Keys.clickCopyOnly: false,
+            Keys.keystrokeSpeed: KeystrokeSpeed.balanced.rawValue,
+            Keys.keystrokeWarnThreshold: 2000,
+            Keys.mcpEnabled: false,
+            Keys.mcpPort: 51764,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
         panelWidth = defaults.double(forKey: Keys.panelWidth)
@@ -455,6 +526,17 @@ final class AppSettings: ObservableObject {
             return stored >= 10 && stored <= 600 ? stored : 90
         }()
         iCloudSyncEnabled = defaults.bool(forKey: Keys.iCloudSyncEnabled)
+        clickCopyOnly = defaults.bool(forKey: Keys.clickCopyOnly)
+        keystrokeSpeed = KeystrokeSpeed(rawValue: defaults.string(forKey: Keys.keystrokeSpeed) ?? "") ?? .balanced
+        keystrokeWarnThreshold = {
+            let stored = defaults.integer(forKey: Keys.keystrokeWarnThreshold)
+            return stored > 0 ? stored : 2000
+        }()
+        mcpEnabled = defaults.bool(forKey: Keys.mcpEnabled)
+        mcpPort = {
+            let stored = defaults.integer(forKey: Keys.mcpPort)
+            return (stored >= 1024 && stored <= 65535) ? stored : 51764
+        }()
     }
 
     /// Resolve the stored sound id, migrating the legacy classic-enum key the

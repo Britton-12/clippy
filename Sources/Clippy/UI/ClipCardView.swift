@@ -1,5 +1,22 @@
 import SwiftUI
 
+/// ButtonStyle that renders the card label and applies a press-scale effect.
+/// Owning press state here (via configuration.isPressed) is correct because
+/// Button arbitrates with .draggable and .contextMenu without needing a
+/// separate onLongPressGesture hack.
+private struct CardButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.10),
+                value: configuration.isPressed
+            )
+    }
+}
+
 /// One clipboard item rendered as a card: colored edge stripe (per-app or
 /// per-kind tint), source app icon, content-type badge, preview text or image
 /// thumbnail, and hover-revealed quick actions. Selection draws an accent ring.
@@ -13,8 +30,12 @@ struct ClipCardView: View {
     /// its icon replaces the app icon and its color overrides the stripe color.
     let pinnedCategory: Category?
 
+    /// Primary click action: pastes or copies depending on the click-mode setting.
+    let onActivate: () -> Void
     let onPaste: () -> Void
     let onPastePlain: () -> Void
+    /// Types the clip text as keystrokes into the active app.
+    let onSendKeystrokes: () -> Void
     let onEdit: () -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
@@ -25,9 +46,6 @@ struct ClipCardView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
-    /// True while the primary mouse button is held over the card, for the
-    /// brief pressed-state feedback that single-click paste otherwise lacks.
-    @State private var isPressed = false
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -46,8 +64,10 @@ struct ClipCardView: View {
         categoryColors: [Color],
         pinnedCategory: Category?,
         isRenaming: Binding<Bool> = .constant(false),
+        onActivate: @escaping () -> Void,
         onPaste: @escaping () -> Void,
         onPastePlain: @escaping () -> Void,
+        onSendKeystrokes: @escaping () -> Void,
         onEdit: @escaping () -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -59,8 +79,10 @@ struct ClipCardView: View {
         self.categoryColors = categoryColors
         self.pinnedCategory = pinnedCategory
         self._isRenaming = isRenaming
+        self.onActivate = onActivate
         self.onPaste = onPaste
         self.onPastePlain = onPastePlain
+        self.onSendKeystrokes = onSendKeystrokes
         self.onEdit = onEdit
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
@@ -88,64 +110,62 @@ struct ClipCardView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Color identity stripe; hidden in plain style (no chrome at all).
-            if settings.cardStyle != .plain {
-                Rectangle()
-                    .fill(cardColor)
-                    .frame(width: 4)
-            }
+        // Wrapping in Button lets SwiftUI own hit-testing and press-state, which
+        // composes correctly with .draggable and .contextMenu. CardButtonStyle
+        // applies the scale feedback so the onLongPressGesture hack is gone.
+        Button(action: onActivate) {
+            HStack(spacing: 0) {
+                // Color identity stripe; hidden in plain style (no chrome at all).
+                if settings.cardStyle != .plain {
+                    Rectangle()
+                        .fill(cardColor)
+                        .frame(width: 4)
+                }
 
-            VStack(alignment: .leading, spacing: 5) {
-                headerRow
-                if isImage {
-                    imagePreview
-                } else {
-                    Text(clip.previewText)
-                        .font(PanelTypography.body(settings))
-                        .lineLimit(3)
-                        .foregroundStyle(tokens.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    headerRow
+                    if isImage {
+                        imagePreview
+                    } else {
+                        Text(clip.previewText)
+                            .font(PanelTypography.body(settings))
+                            .lineLimit(3)
+                            .foregroundStyle(tokens.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if case .colorValue(let swatch) = kind {
+                        swatchRow(swatch)
+                    }
                 }
-                if case .colorValue(let swatch) = kind {
-                    swatchRow(swatch)
-                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // Constant-width base border so selection never reflows content. The
+            // 1pt strokeBorder insets the same amount whether selected or not.
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(cardBorderColor, lineWidth: 1)
+            )
+            // Selection ring drawn on top as a centered stroke (no content inset),
+            // so toggling selection shifts nothing.
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(tokens.accent, lineWidth: 2)
+                    .opacity(isSelected ? 1 : 0)
+            )
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHovering = hovering
+                // The whole card is clickable; show the hand cursor so that
+                // affordance is discoverable.
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        // Constant-width base border so selection never reflows content. The
-        // 1pt strokeBorder insets the same amount whether selected or not.
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(cardBorderColor, lineWidth: 1)
-        )
-        // Selection ring drawn on top as a centered stroke (no content inset),
-        // so toggling selection shifts nothing.
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(tokens.accent, lineWidth: 2)
-                .opacity(isSelected ? 1 : 0)
-        )
-        // Brief pressed feedback so single-click paste feels like a button.
-        .scaleEffect(isPressed ? 0.98 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: isPressed)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            isHovering = hovering
-            // The whole card is clickable (single-click pastes); show the hand
-            // cursor so that affordance is discoverable.
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        // minimumDuration 0 tracks press/release for the scale effect without
-        // consuming the parent's tap-to-paste or drag gestures.
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, perform: {}) { pressing in
-            isPressed = pressing
-        }
+        .buttonStyle(CardButtonStyle())
         .help(kind.label)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
@@ -318,7 +338,9 @@ struct ClipCardView: View {
     private var hoverActions: some View {
         HStack(spacing: 6) {
             if !isImage {
-                cardActionButton("doc.on.clipboard", help: "Paste as plain text", action: onPastePlain)
+                // "Paste as plain text" is still reachable via the context menu;
+                // this slot is now the quicker "send as keystrokes" action.
+                cardActionButton("keyboard", help: "Send as keystrokes", action: onSendKeystrokes)
                 cardActionButton("pencil", help: "Edit", action: onEdit)
             }
             cardActionButton("character.cursor.ibeam", help: "Rename", action: beginRename)
@@ -358,16 +380,56 @@ struct ClipCardView: View {
 
     /// Body re-evaluates often (hover, selection); thumbnails come from this
     /// cache instead of disk after the first load.
-    private static let thumbnailCache = NSCache<NSString, NSImage>()
+    private static let thumbnailCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        // Cap entry count so scrolling through a large history can't accumulate
+        // hundreds of decompressed bitmaps in RAM (was the primary 4 GB cause).
+        c.countLimit = 200
+        // 64 MB byte budget; cost is set per-object as pixelW*pixelH*4 bytes.
+        c.totalCostLimit = 64 * 1024 * 1024
+        return c
+    }()
+
+    /// Evict everything from the thumbnail cache. Called by the memory-pressure
+    /// handler in AppDelegate so the OS can reclaim the decoded bitmap pages.
+    static func purgeThumbnailCache() {
+        thumbnailCache.removeAllObjects()
+    }
+
+    // Max pixel size for thumbnail decode. Cards render at maxHeight 72 @2x,
+    // so 300 px is ample and avoids decompressing full-resolution originals.
+    private static let thumbnailMaxPixelSize = 300
 
     private static func thumbnail(for filename: String) -> NSImage? {
-        if let cached = thumbnailCache.object(forKey: filename as NSString) {
+        let key = filename as NSString
+        if let cached = thumbnailCache.object(forKey: key) {
             return cached
         }
-        guard let image = NSImage(contentsOf: ClipDatabase.shared.media.url(for: filename)) else {
+
+        let url = ClipDatabase.shared.media.url(for: filename)
+
+        // Downsample at decode time via ImageIO so the decompressed bitmap is
+        // small from the start; NSImage(contentsOf:) would decompress at full
+        // resolution and hold the entire uncompressed image in the cache.
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
             return nil
         }
-        thumbnailCache.setObject(image, forKey: filename as NSString)
+
+        let w = cgThumb.width
+        let h = cgThumb.height
+        let image = NSImage(cgImage: cgThumb,
+                            size: NSSize(width: w, height: h))
+
+        // Cost = estimated decoded bytes so the totalCostLimit budget is accurate.
+        let cost = w * h * 4
+        thumbnailCache.setObject(image, forKey: key, cost: cost)
         return image
     }
 

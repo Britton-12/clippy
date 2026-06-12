@@ -27,6 +27,7 @@ private struct TextClipEditor: View {
     let onClose: () -> Void
 
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var actionStore = AIActionStore.shared
     @StateObject private var ai = AIActionRunner()
     @State private var text: String
     @State private var title: String
@@ -80,17 +81,19 @@ private struct TextClipEditor: View {
 
     private var aiMenu: some View {
         Menu {
-            Button("Suggest title") {
-                ai.run { try await $0.suggestTitle(forText: text) }
+            // Custom actions from the store - same execution path as ClipListView.
+            ForEach(actionStore.actions) { action in
+                Button {
+                    runAction(action)
+                } label: {
+                    HStack {
+                        ActionIconView(kind: action.iconKind, value: action.symbolName)
+                        Text(action.name)
+                    }
+                }
             }
-            Menu("Rewrite") {
-                Button("Fix spelling & grammar") { rewrite("Fix spelling and grammar, keep the meaning") }
-                Button("Make it more formal") { rewrite("Make it more formal and professional") }
-                Button("Make it more concise") { rewrite("Make it more concise") }
-                Button("Improve clarity") { rewrite("Improve clarity and flow") }
-            }
-            Button("Summarize") {
-                ai.run { try await $0.summarize(text) }
+            if actionStore.actions.isEmpty {
+                Text("No actions configured.")
             }
         } label: {
             Label("AI", systemImage: "sparkles")
@@ -101,8 +104,13 @@ private struct TextClipEditor: View {
         .fixedSize()
     }
 
-    private func rewrite(_ instruction: String) {
-        ai.run { try await $0.rewrite(text, instruction: instruction) }
+    /// Run a store action against the current editor text, mirroring
+    /// ClipListView.runAIAction exactly (AIService.run(action:on:)).
+    private func runAction(_ action: AIAction) {
+        let clipText = text
+        ai.run { service in
+            try await service.run(action: action, on: clipText)
+        }
     }
 
     private func apply(_ proposal: AIProposal) {

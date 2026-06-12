@@ -9,6 +9,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var panel: PastePanel?
 
     var onPaste: ((Clip, Bool) -> Void)?
+    var onPrimary: ((Clip) -> Void)?
+    var onSendKeystrokes: ((Clip) -> Void)?
     var onEdit: ((Clip) -> Void)?
     var onOpenSettings: (() -> Void)?
 
@@ -36,6 +38,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         let root = ClipListView(
             store: store,
             onPaste: { [weak self] clip, asPlainText in self?.onPaste?(clip, asPlainText) },
+            onPrimary: { [weak self] clip in self?.onPrimary?(clip) },
+            onSendKeystrokes: { [weak self] clip in self?.onSendKeystrokes?(clip) },
             onEdit: { [weak self] clip in self?.onEdit?(clip) },
             onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in

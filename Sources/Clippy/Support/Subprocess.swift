@@ -19,6 +19,43 @@ enum Subprocess {
         var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
     }
 
+    /// Read from a pipe file handle in chunks, stopping once `ceiling` bytes
+    /// have been accumulated. When truncated, the child process is terminated
+    /// so both pipes drain to EOF quickly rather than blocking indefinitely.
+    /// Returns the accumulated bytes with an optional truncation marker appended.
+    private static func readBounded(_ handle: FileHandle,
+                                    ceiling: Int,
+                                    truncationMarker: String,
+                                    process: Process) -> Data {
+        var accumulated = Data()
+        let chunkSize = 65_536  // 64 KB read granularity
+        var truncated = false
+
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                // availableData returns empty at EOF on a pipe whose write-end is closed.
+                break
+            }
+            accumulated.append(chunk)
+            if accumulated.count >= ceiling {
+                // Ceiling hit: kill the child so we reach EOF quickly on both
+                // streams instead of waiting for the process to finish naturally.
+                if process.isRunning { process.terminate() }
+                truncated = true
+                break
+            }
+            // Yield briefly so the OS can schedule the child to produce more data.
+            Thread.sleep(forTimeInterval: 0.001)
+            _ = chunkSize  // suppress unused-variable warning
+        }
+
+        if truncated, let marker = truncationMarker.data(using: .utf8) {
+            accumulated.append(marker)
+        }
+        return accumulated
+    }
+
     static func run(_ executable: String, _ arguments: [String],
                     input: String? = nil, environment: [String: String]? = nil,
                     timeout: TimeInterval = 20) async -> Output {
@@ -52,13 +89,27 @@ enum Subprocess {
                 }
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
 
+                // Hard ceiling per stream: a runaway producer (e.g. an infinite
+                // loop printing to stdout) would otherwise fill RAM before the
+                // timeout fires, because readDataToEndOfFile blocks until EOF.
+                // Instead we read in chunks and stop accumulating once the limit
+                // is reached, then terminate the child so the pipes drain quickly.
+                let outputCeiling = 5 * 1024 * 1024  // 5 MB per stream
+                let truncationMarker = "\n[output truncated]"
+
                 var errData = Data()
                 let errDone = DispatchSemaphore(value: 0)
                 DispatchQueue.global().async {
-                    errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    errData = Self.readBounded(errPipe.fileHandleForReading,
+                                               ceiling: outputCeiling,
+                                               truncationMarker: truncationMarker,
+                                               process: process)
                     errDone.signal()
                 }
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                let outData = Self.readBounded(outPipe.fileHandleForReading,
+                                               ceiling: outputCeiling,
+                                               truncationMarker: truncationMarker,
+                                               process: process)
                 errDone.wait()
                 process.waitUntilExit()
                 watchdog.cancel()

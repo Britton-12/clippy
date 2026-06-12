@@ -66,13 +66,24 @@ enum ScriptRunner {
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
 
                 // Read both streams concurrently to avoid pipe-buffer deadlock.
+                // A bounded read is used so a runaway script producing infinite
+                // output cannot fill RAM before the timeout watchdog fires.
+                let outputCeiling = 5 * 1024 * 1024  // 5 MB per stream
+                let truncationMarker = "\n[output truncated]"
+
                 var errData = Data()
                 let errDone = DispatchSemaphore(value: 0)
                 DispatchQueue.global().async {
-                    errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    errData = Self.readBounded(errPipe.fileHandleForReading,
+                                              ceiling: outputCeiling,
+                                              truncationMarker: truncationMarker,
+                                              process: process)
                     errDone.signal()
                 }
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                let outData = Self.readBounded(outPipe.fileHandleForReading,
+                                              ceiling: outputCeiling,
+                                              truncationMarker: truncationMarker,
+                                              process: process)
                 errDone.wait()
                 process.waitUntilExit()
                 watchdog.cancel()
@@ -85,6 +96,34 @@ enum ScriptRunner {
                     timedOut: flag.didFire))
             }
         }
+    }
+
+    /// Read from a pipe in chunks up to `ceiling` bytes, then terminate the
+    /// child so both pipes drain quickly. Mirrors the same helper in Subprocess.
+    private static func readBounded(_ handle: FileHandle,
+                                    ceiling: Int,
+                                    truncationMarker: String,
+                                    process: Process) -> Data {
+        var accumulated = Data()
+        var truncated = false
+
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { break }
+            accumulated.append(chunk)
+            if accumulated.count >= ceiling {
+                // Terminate so EOF propagates quickly on both streams.
+                if process.isRunning { process.terminate() }
+                truncated = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+
+        if truncated, let marker = truncationMarker.data(using: .utf8) {
+            accumulated.append(marker)
+        }
+        return accumulated
     }
 
     private static func ms(since start: Date) -> Int {

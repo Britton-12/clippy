@@ -9,20 +9,29 @@
 // Requirements: macOS with Xcode Command Line Tools (AppKit, CoreGraphics,
 //   and iconutil are all standard). No third-party dependencies.
 //
-// Design: macOS Big Sur rounded-square icon presentation.
-//   Canvas:        1024 x 1024 pt
-//   Tile size:     824 pt (centered; 100 pt transparent padding each side)
-//   Corner radius: 185 pt on the 824 pt tile  (~22.5%, continuous-corner ratio)
-//   Outside tile:  fully transparent
-//   Inside tile:   mascot scaled to fill the tile, anti-aliased
+// Design: modern macOS full-bleed "squircle" icon presentation.
+//   Canvas:        1024 x 1024 px, fully filled (no transparent border)
+//   Squircle:      rounded rect covering the whole canvas
+//   Corner radius: ~229 px  (22.37% of side — Apple's macOS icon-grid ratio)
+//   Fill:          the master's own background color, sampled from a corner
+//                  pixel so the scaled-down mascot blends with no seam
+//   Mascot:        scaled DOWN and centered with a comfortable margin on all
+//                  four sides so nothing touches an edge or corner
+//
+// WHY this shape: the master art (img/Clippy.png) is full-bleed — the mascot
+// touches all four edges with ~0 px margin. Drawing it edge-to-edge let the
+// rounded corners slice the legs and hand flat ("cut off"). The fix is to
+// fill the squircle with the same solid background the master uses, then drop
+// the mascot in smaller and centered. Because the fill color matches the
+// master's own background, the composite is seamless.
 //
 // Pipeline:
-//   1. NSImage loads img/Clippy.png via the OS codec — handles JPEG data
-//      regardless of file extension, no hand-rolled decoder.
-//   2. CoreGraphics composites the mascot into the rounded-rect tile with
-//      anti-aliased edge feathering via a soft SDF mask.
-//   3. sips resamples the 1024 master to each required pixel size.
-//   4. iconutil assembles the .icns.
+//   1. NSImage loads img/Clippy.png via the OS codec.
+//   2. Sample the master's corner pixel for the background fill color.
+//   3. CoreGraphics fills a full-canvas squircle and draws the mascot scaled
+//      down + centered inside the safe area.
+//   4. sips resamples the 1024 master to each required pixel size.
+//   5. iconutil assembles the .icns.
 
 import AppKit
 import CoreGraphics
@@ -47,10 +56,14 @@ let icnsOut     = "\(repoRoot)/assets/AppIcon.icns"
 // Geometry constants
 // ---------------------------------------------------------------------------
 
-let CANVAS:  Int = 1024          // total icon canvas in pixels
-let TILE:    Int = 824           // mascot tile size (Big Sur grid: 824/1024)
-let TILE_PAD = (CANVAS - TILE) / 2  // 100 px transparent padding each side
-let RADIUS: CGFloat = 185        // continuous-corner radius on the 824-pt tile
+let CANVAS:  Int = 1024          // total icon canvas in pixels (fully filled)
+// Apple's macOS icon-grid corner ratio for a full-bleed icon: ~22.37% of side.
+let CORNER_RATIO: CGFloat = 0.2237
+let RADIUS: CGFloat = CGFloat(CANVAS) * CORNER_RATIO   // ~229 px at 1024
+// Fraction of the canvas the mascot occupies. ~0.74 leaves ~13% margin per
+// side so the waving hand, the loop top, and the legs all stay clear of the
+// squircle edges and corners.
+let MASCOT_SCALE: CGFloat = 0.74
 
 // Standard macOS iconset entries: (logical_pt, scale_factor)
 let iconSizes: [(Int, Int)] = [
@@ -99,16 +112,36 @@ guard let sourceCG: CGImage = {
 print("Source loaded: \(sourceCG.width)x\(sourceCG.height)  [\(sourcePath)]")
 
 // ---------------------------------------------------------------------------
-// Step 2: Composite the mascot into the 1024x1024 rounded-rect tile.
+// Step 2: Composite the mascot into a full-canvas squircle.
 //
 // We draw into an RGBA bitmap context:
-//   a. Fill transparent.
-//   b. Clip to the rounded-rect path (corner radius RADIUS, tile origin TILE_PAD).
-//   c. Draw the source image scaled to fill the tile exactly.
+//   a. Sample the master's corner pixel -> background fill color.
+//   b. Clip to a full-canvas rounded-rect (squircle) and fill it with that color.
+//   c. Draw the mascot scaled DOWN (MASCOT_SCALE) and centered, with margin on
+//      all four sides so no limb touches an edge or corner.
 //
-// CoreGraphics clips and anti-aliases the edges automatically; no manual
-// SDF mask needed because addRoundedRect already uses sub-pixel AA.
+// Because the fill color equals the master's own background, the scaled-down
+// mascot drops in with no visible seam.
 // ---------------------------------------------------------------------------
+
+// Sample the master's top-left corner for the background fill. The master is
+// full-bleed light-blue with no alpha, so the corner is pure background.
+func sampleCornerColor(_ image: CGImage) -> CGColor {
+    let w = image.width, h = image.height
+    var pixel = [UInt8](repeating: 0, count: 4)
+    let space = CGColorSpaceCreateDeviceRGB()
+    let info = CGImageAlphaInfo.premultipliedLast.rawValue
+    if let c = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
+                         bytesPerRow: 4, space: space, bitmapInfo: info) {
+        // Draw the source offset so its top-left pixel lands in our 1x1 context.
+        c.draw(image, in: CGRect(x: 0, y: CGFloat(-(h - 1)), width: CGFloat(w), height: CGFloat(h)))
+    }
+    return CGColor(red: CGFloat(pixel[0]) / 255.0,
+                   green: CGFloat(pixel[1]) / 255.0,
+                   blue: CGFloat(pixel[2]) / 255.0,
+                   alpha: 1.0)
+}
+let fillColor = sampleCornerColor(sourceCG)
 
 let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
 guard let ctx = CGContext(
@@ -124,34 +157,38 @@ guard let ctx = CGContext(
     exit(1)
 }
 
-// Clear to transparent.
+// Clear to transparent (outside the squircle stays transparent).
 ctx.clear(CGRect(x: 0, y: 0, width: CANVAS, height: CANVAS))
 
-// Build the rounded-rect clip path.
-// CGContext's coordinate origin is bottom-left, so y is measured from bottom.
-let tileRect = CGRect(x: TILE_PAD, y: TILE_PAD, width: TILE, height: TILE)
-let clipPath = CGPath(roundedRect: tileRect, cornerWidth: RADIUS, cornerHeight: RADIUS, transform: nil)
+// Full-canvas squircle: fills the whole icon, rounded corners only.
+let canvasRect = CGRect(x: 0, y: 0, width: CANVAS, height: CANVAS)
+let clipPath = CGPath(roundedRect: canvasRect, cornerWidth: RADIUS, cornerHeight: RADIUS, transform: nil)
 
 ctx.saveGState()
 ctx.addPath(clipPath)
 ctx.clip()
 
-// Draw the mascot inset inside the tile. WHY: the full-bleed source fills
-// 1024x1024 with zero margin, so drawing it edge-to-edge let the rounded
-// corners slice off the art; insetting keeps breathing room inside the curve.
+// Fill the squircle with the sampled background color so the scaled mascot
+// blends seamlessly.
+ctx.setFillColor(fillColor)
+ctx.fill(canvasRect)
+
+// Draw the mascot scaled DOWN and centered. WHY: the master is full-bleed, so
+// drawing it edge-to-edge let the rounded corners slice the legs and hand.
+// Scaling to MASCOT_SCALE of the canvas keeps a comfortable margin on all
+// sides; the matching fill hides the mascot's own background.
 ctx.interpolationQuality = .high
-let artRect = tileRect.insetBy(dx: 90, dy: 90)
-// scaledToFit: preserve aspect ratio, center within artRect (square source -> exact fit).
 let srcAspect = CGFloat(sourceCG.width) / CGFloat(sourceCG.height)
-var drawW = artRect.width
-var drawH = artRect.width / srcAspect
-if drawH > artRect.height {
-    drawH = artRect.height
-    drawW = artRect.height * srcAspect
+let target = CGFloat(CANVAS) * MASCOT_SCALE
+var drawW = target
+var drawH = target / srcAspect
+if drawH > target {
+    drawH = target
+    drawW = target * srcAspect
 }
 let drawRect = CGRect(
-    x: artRect.midX - drawW / 2,
-    y: artRect.midY - drawH / 2,
+    x: (CGFloat(CANVAS) - drawW) / 2,
+    y: (CGFloat(CANVAS) - drawH) / 2,
     width: drawW,
     height: drawH
 )

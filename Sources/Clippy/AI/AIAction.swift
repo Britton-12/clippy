@@ -28,10 +28,15 @@ enum AIActionOutputDisposition: String, Codable, CaseIterable, Identifiable {
 ///   {instruction} — an extra instruction the UI can supply at run time
 ///
 /// Built-in defaults are shipped via `AIActionStore.seedDefaults()`.
-struct AIAction: Identifiable, Codable, Equatable {
+struct AIAction: Identifiable, Equatable {
     var id: UUID
     var name: String
-    /// SF Symbol name shown in the UI.
+    /// How the icon is represented: SF Symbol, emoji, or app bundle ID.
+    /// Defaults to `.symbol` so the synthesized memberwise init stays
+    /// source-compatible with existing call sites that predate the icon-kind field.
+    var iconKind: CategoryIconKind = .symbol
+    /// The icon value: SF Symbol name, emoji character, or app bundle ID.
+    /// Named `symbolName` for JSON compatibility with older saved actions.
     var symbolName: String
     /// System-prompt template. Use `{clip}` and `{instruction}` as placeholders.
     var promptTemplate: String
@@ -40,9 +45,48 @@ struct AIAction: Identifiable, Codable, Equatable {
     var outputDisposition: AIActionOutputDisposition
     /// Built-in actions may not be deleted, only edited.
     var isBuiltIn: Bool
+}
 
-    // MARK: - Template rendering
+// MARK: - Codable with migration
 
+extension AIAction: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, name, iconKind, symbolName, promptTemplate
+        case temperature, maxTokens, outputDisposition, isBuiltIn
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        symbolName = try c.decode(String.self, forKey: .symbolName)
+        // Old JSON has no `iconKind`; default to .symbol so existing actions
+        // that stored an SF Symbol name in `symbolName` continue to render correctly.
+        iconKind = try c.decodeIfPresent(CategoryIconKind.self, forKey: .iconKind) ?? .symbol
+        promptTemplate = try c.decode(String.self, forKey: .promptTemplate)
+        temperature = try c.decode(Double.self, forKey: .temperature)
+        maxTokens = try c.decode(Int.self, forKey: .maxTokens)
+        outputDisposition = try c.decode(AIActionOutputDisposition.self, forKey: .outputDisposition)
+        isBuiltIn = try c.decode(Bool.self, forKey: .isBuiltIn)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(iconKind, forKey: .iconKind)
+        try c.encode(symbolName, forKey: .symbolName)
+        try c.encode(promptTemplate, forKey: .promptTemplate)
+        try c.encode(temperature, forKey: .temperature)
+        try c.encode(maxTokens, forKey: .maxTokens)
+        try c.encode(outputDisposition, forKey: .outputDisposition)
+        try c.encode(isBuiltIn, forKey: .isBuiltIn)
+    }
+}
+
+// MARK: - Template rendering
+
+extension AIAction {
     /// Substitute `{clip}` and `{instruction}`, then trim whitespace.
     func buildPrompt(clip: String, instruction: String = "") -> String {
         promptTemplate
@@ -60,56 +104,56 @@ extension AIAction {
     static let builtIns: [AIAction] = [
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,
                  name: "Suggest Title",
-                 symbolName: "textformat.size",
+                 iconKind: .symbol, symbolName: "textformat.size",
                  promptTemplate: "Write a short, descriptive title (3 to 6 words) for this clipboard snippet. Reply with only the title.\n\n{clip}",
                  temperature: 0.2, maxTokens: 32,
                  outputDisposition: .proposeEdit, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!,
                  name: "Rewrite",
-                 symbolName: "pencil",
+                 iconKind: .symbol, symbolName: "pencil",
                  promptTemplate: "Rewrite the following text exactly as instructed. Reply with only the rewritten text.\n\nInstruction: {instruction}\n\nText:\n{clip}",
                  temperature: 0.4, maxTokens: 2048,
                  outputDisposition: .proposeEdit, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000003")!,
                  name: "Summarize",
-                 symbolName: "text.alignleft",
+                 iconKind: .symbol, symbolName: "text.alignleft",
                  promptTemplate: "Summarize the following text in one or two plain sentences. Reply with only the summary.\n\n{clip}",
                  temperature: 0.3, maxTokens: 256,
                  outputDisposition: .proposeEdit, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000004")!,
                  name: "Translate",
-                 symbolName: "globe",
+                 iconKind: .symbol, symbolName: "globe",
                  promptTemplate: "Translate the following text to {instruction}. Reply with only the translated text.\n\n{clip}",
                  temperature: 0.3, maxTokens: 2048,
                  outputDisposition: .proposeEdit, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000005")!,
                  name: "Extract Key Points",
-                 symbolName: "list.bullet",
+                 iconKind: .symbol, symbolName: "list.bullet",
                  promptTemplate: "Extract the key points from the following text as a short bulleted list. Reply with only the bullet points.\n\n{clip}",
                  temperature: 0.3, maxTokens: 512,
                  outputDisposition: .newClip, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000006")!,
                  name: "Change Tone",
-                 symbolName: "waveform",
+                 iconKind: .symbol, symbolName: "waveform",
                  promptTemplate: "Rewrite the following text in a {instruction} tone. Reply with only the rewritten text.\n\n{clip}",
                  temperature: 0.5, maxTokens: 2048,
                  outputDisposition: .proposeEdit, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000007")!,
                  name: "Generate Clip",
-                 symbolName: "sparkles",
+                 iconKind: .symbol, symbolName: "sparkles",
                  promptTemplate: "Generate a single useful clipboard snippet based on this request. Reply with only the snippet text.\n\nRequest: {instruction}\n\nContext:\n{clip}",
                  temperature: 0.6, maxTokens: 1024,
                  outputDisposition: .newClip, isBuiltIn: true),
 
         AIAction(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000008")!,
                  name: "Suggest Category",
-                 symbolName: "folder",
+                 iconKind: .symbol, symbolName: "folder",
                  promptTemplate: "Assign this item to exactly one category from the provided list. Reply with only the category name. If none fit, reply NONE.\n\nCategories:\n{instruction}\n\nItem:\n{clip}",
                  temperature: 0.0, maxTokens: 24,
                  outputDisposition: .proposeEdit, isBuiltIn: true),

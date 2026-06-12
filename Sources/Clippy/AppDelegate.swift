@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Sparkle
 import SwiftUI
 
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var pauseMenuItem: NSMenuItem!
     private let scriptsMenu = NSMenu()
+    private let keystrokeService = KeystrokeService()
 
     // Sparkle needs a packaged .app whose Info.plist carries SUFeedURL; when
     // running unbundled (swift run, smoke tests) leave the updater unstarted
@@ -24,9 +26,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var panelController = PanelController(store: store)
     private let editorController = EditorWindowController()
 
+    // Strong reference required: a DispatchSourceMemoryPressure is suspended
+    // and released if the owner goes away, silently disabling the safeguard.
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+        setupMainMenu()
         monitor.start()
+
+        // Log launch with version so post-mortem analysis can correlate log
+        // lines to the exact binary that was running when a problem occurred.
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build   = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        ClippyLog.info("Clippy launched — version \(version) (\(build))", category: ClippyLog.lifecycle)
+
+        // Uncaught-exception handler: write name/reason/stack to the log file
+        // synchronously before the process dies so the crash is always on disk,
+        // not only in the os_log ring buffer which may roll over before diagnosis.
+        NSSetUncaughtExceptionHandler { exception in
+            let msg = "UNCAUGHT EXCEPTION: \(exception.name.rawValue): \(exception.reason ?? "(no reason)") | \(exception.callStackSymbols.prefix(20).joined(separator: " | "))"
+            ClippyLog.syncWrite(msg, level: "FATAL")
+        }
+
+        // Memory-pressure source: the OS notifies us before it starts killing
+        // processes. On warning we free the thumbnail cache (the primary 4 GB
+        // cause); on critical we also trim the in-memory clip array so SwiftUI
+        // can release its retained Clip values and backing storage.
+        let pressureSource = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .main
+        )
+        pressureSource.setEventHandler { [weak self] in
+            guard let self else { return }
+            let event = pressureSource.data
+            let rss = Self.residentMemoryMB()
+            if event.contains(.critical) {
+                ClippyLog.error("Memory pressure CRITICAL — RSS ~\(rss) MB; purging cache + trimming clips",
+                                category: ClippyLog.lifecycle)
+                ClipCardView.purgeThumbnailCache()
+                self.store.trimResident()
+            } else if event.contains(.warning) {
+                ClippyLog.info("Memory pressure WARNING — RSS ~\(rss) MB; purging thumbnail cache",
+                               category: ClippyLog.lifecycle)
+                ClipCardView.purgeThumbnailCache()
+            }
+        }
+        pressureSource.resume()
+        memoryPressureSource = pressureSource
 
         // Crash between media write and row insert leaves orphan files;
         // sweep them off the main thread at launch.
@@ -39,6 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // otherwise; never touches CloudKit, so it cannot crash on launch).
         ICloudSyncService.shared.startIfEnabled()
 
+        // Start the MCP server if the user has enabled it, and wire up
+        // live reactions to settings changes.
+        McpServerController.shared.syncWithSettings()
+
         HotKeyCenter.shared.handler = { [weak self] in
             self?.panelController.toggle()
         }
@@ -48,6 +99,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.panelController.hide()
             self.pasteService.paste(clip, asPlainText: asPlainText)
+        }
+        panelController.onPrimary = { [weak self] clip in
+            guard let self else { return }
+            self.panelController.hide()
+            if AppSettings.shared.clickCopyOnly {
+                self.pasteService.copy(clip, asPlainText: AppSettings.shared.pastePlainTextByDefault)
+            } else {
+                self.pasteService.paste(clip, asPlainText: AppSettings.shared.pastePlainTextByDefault)
+            }
+        }
+        panelController.onSendKeystrokes = { [weak self] clip in
+            guard let self else { return }
+            self.panelController.hide()
+            // Write to clipboard so the user has a copy-fallback, then type.
+            self.pasteService.copy(clip, asPlainText: true)
+            let text = clip.contentText
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.keystrokeService.type(text)
+            }
         }
         panelController.onEdit = { [weak self] clip in
             guard let self else { return }
@@ -96,9 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let service = ICloudSyncService(rootOverride: dir)
             Task { @MainActor in
                 await service.sync(force: true)
-                print("ICLOUD_SELFTEST status=\(service.status)")
+                ClippyLog.info("ICLOUD_SELFTEST status=\(service.status)", category: ClippyLog.sync)
                 let synced = dir.appendingPathComponent("Clippy/clippy-sync.toml")
-                print("ICLOUD_SELFTEST file_exists=\(FileManager.default.fileExists(atPath: synced.path))")
+                ClippyLog.info("ICLOUD_SELFTEST file_exists=\(FileManager.default.fileExists(atPath: synced.path))",
+                               category: ClippyLog.sync)
                 NSApp.terminate(nil)
             }
         }
@@ -230,6 +301,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Main menu (restores Cmd+C/V/X/A/Z in all app windows)
+
+    /// Assigns a minimal NSApp.mainMenu so standard editing key-equivalents can
+    /// find a target through the responder chain. Without this the accessory-app
+    /// activation mode leaves mainMenu nil and the system cannot dispatch Cmd+C
+    /// etc. to the focused text field or text view.
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App submenu (macOS requires the first item to be the app menu).
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        let quitItem = NSMenuItem(
+            title: "Quit Clippy",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        appMenu.addItem(quitItem)
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        // Edit submenu: Undo, Redo, then the standard clipboard verbs. All
+        // editing items leave target == nil so events flow up the responder chain
+        // to the first object that can handle them (NSTextView, NSTextField, etc.).
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+
+        let undoItem = NSMenuItem(
+            title: "Undo",
+            action: Selector(("undo:")),
+            keyEquivalent: "z"
+        )
+        editMenu.addItem(undoItem)
+
+        let redoItem = NSMenuItem(
+            title: "Redo",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        )
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+
+        editMenu.addItem(.separator())
+
+        let cutItem = NSMenuItem(
+            title: "Cut",
+            action: #selector(NSText.cut(_:)),
+            keyEquivalent: "x"
+        )
+        editMenu.addItem(cutItem)
+
+        let copyItem = NSMenuItem(
+            title: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        )
+        editMenu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(
+            title: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        )
+        editMenu.addItem(pasteItem)
+
+        let selectAllItem = NSMenuItem(
+            title: "Select All",
+            action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a"
+        )
+        editMenu.addItem(selectAllItem)
+
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
+        NSApp.mainMenu = mainMenu
+    }
+
     // MARK: - Scripts
 
     @objc private func runScriptFromMenu(_ sender: NSMenuItem) {
@@ -262,6 +411,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = result.succeeded ? .informational : .warning
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        ClippyLog.info("Clippy shutting down cleanly", category: ClippyLog.lifecycle)
+        // Ensure the node MCP server process never outlives the app.
+        McpServerController.shared.stop()
+    }
+
+    // MARK: - Memory helpers
+
+    /// Read the process's current resident set size via mach_task_basic_info.
+    /// Returns 0 if the call fails (non-fatal; used only for log context).
+    private static func residentMemoryMB() -> Int {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Int(info.resident_size) / (1024 * 1024)
     }
 }
 
