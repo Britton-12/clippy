@@ -137,6 +137,63 @@ extension ClipDatabase {
         }
     }
 
+    /// Clips belonging to a category, ordered by their per-category sortOrder.
+    /// Used to drive the reorderable clip list in a category pane.
+    func clipsForCategory(_ categoryID: Int64) throws -> [Clip] {
+        try dbQueue.read { db in
+            try Clip.fetchAll(
+                db,
+                sql: """
+                    SELECT clips.*
+                    FROM clips
+                    JOIN clip_category ON clip_category.clipID = clips.id
+                    WHERE clip_category.categoryID = ?
+                    ORDER BY clip_category.sortOrder ASC, clip_category.addedAt DESC
+                    """,
+                arguments: [categoryID]
+            )
+        }
+    }
+
+    /// Reorder: place `clipID` immediately before `targetClipID` within
+    /// `categoryID`, then renumber that category's sortOrder gap-free.
+    /// Pass nil for `targetClipID` to move `clipID` to the end of the list.
+    func moveClip(_ clipID: Int64, inCategory categoryID: Int64, before targetClipID: Int64?) throws {
+        try dbQueue.write { db in
+            // Load the current ordered clip IDs for this category.
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT clipID FROM clip_category
+                    WHERE categoryID = ?
+                    ORDER BY sortOrder ASC, addedAt DESC
+                    """,
+                arguments: [categoryID]
+            )
+            var ids: [Int64] = rows.map { $0["clipID"] }
+            guard let fromIndex = ids.firstIndex(of: clipID) else { return }
+            ids.remove(at: fromIndex)
+            // Recompute insert position after the removal shifts indices.
+            let insertIndex: Int
+            if let target = targetClipID, let ti = ids.firstIndex(of: target) {
+                insertIndex = ti
+            } else {
+                insertIndex = ids.count
+            }
+            ids.insert(clipID, at: insertIndex)
+            // Write back gap-free sortOrder values, touching only changed rows.
+            for (order, id) in ids.enumerated() {
+                try db.execute(
+                    sql: """
+                        UPDATE clip_category SET sortOrder = ?
+                        WHERE clipID = ? AND categoryID = ?
+                        """,
+                    arguments: [order, id, categoryID]
+                )
+            }
+        }
+    }
+
     /// clipID -> set of category IDs, for fast pinned/membership lookups in views.
     // Whole-table load is bounded in practice: uncategorized clips are capped
     // and categorized clips are user-curated.

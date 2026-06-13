@@ -10,6 +10,7 @@ struct AIActionsManagerView: View {
     @State private var editingAction: AIAction?
     @State private var isCreating = false
     @State private var deletingAction: AIAction?
+    @State private var draggingOverActionID: String?
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -80,6 +81,16 @@ struct AIActionsManagerView: View {
             LazyVStack(spacing: 4) {
                 ForEach(store.actions) { action in
                     actionRow(action)
+                        .reorderDraggable(id: action.id.uuidString)
+                        .reorderDropDestination(
+                            id: action.id.uuidString,
+                            draggingOver: $draggingOverActionID
+                        ) { draggedStr, targetStr in
+                            if let d = UUID(uuidString: draggedStr),
+                               let t = UUID(uuidString: targetStr) {
+                                store.moveAction(draggedID: d, before: t)
+                            }
+                        }
                 }
             }
             .padding(8)

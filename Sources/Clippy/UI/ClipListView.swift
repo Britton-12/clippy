@@ -38,6 +38,9 @@ struct ClipListView: View {
     @StateObject private var aiRunner = AIActionRunner()
     /// The clip the AI action is being run against (needed so onApply can write back).
     @State private var aiTargetClip: Clip?
+    /// The clip ID currently being hovered over during a within-category reorder drag.
+    /// Shared across all category-section rows so the insertion line can track the target.
+    @State private var draggingOverClipID: Int64?
 
     /// Active theme token table; every color below reads from this.
     private var tokens: ThemeTokens { settings.theme }
@@ -46,12 +49,15 @@ struct ClipListView: View {
     /// History is the "loose" root: once a clip is filed into any category it
     /// behaves like a file moved into a folder and no longer appears here, only
     /// inside that category's pane.
+    ///
+    /// Category panes return clips in user-defined sortOrder (drag-reorderable).
+    /// History stays createdAt DESC (a live recency feed, not reorderable).
     private var visibleClips: [Clip] {
         switch selection {
         case .history:
             return store.clips.filter { !store.isPinned($0) }
         case .category(let categoryID):
-            return store.clips.filter { store.categoryIDs(for: $0).contains(categoryID) }
+            return store.clipsForCategory(categoryID)
         case .onePassword:
             return []
         case .scripts:
@@ -59,6 +65,12 @@ struct ClipListView: View {
         case .assistant:
             return []
         }
+    }
+
+    /// Non-nil when the current selection is a category pane.
+    private var activeCategoryID: Int64? {
+        if case .category(let id) = selection { return id }
+        return nil
     }
 
     var body: some View {
@@ -354,7 +366,9 @@ struct ClipListView: View {
     }
 
     private func card(for clip: Clip, at index: Int) -> some View {
-        ClipCardView(
+        let clipID = clip.id ?? -1
+        let categoryID = activeCategoryID
+        return ClipCardView(
             clip: clip,
             isSelected: index == selectedIndex,
             isPinned: store.isPinned(clip),
@@ -379,7 +393,18 @@ struct ClipListView: View {
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
-        .draggable(String(clip.id ?? -1))
+        // Primary drag: carries a bare clip ID so CategorySidePane can file it
+        // into a category. This drag-out-to-apps behavior is always active.
+        .draggable(String(clipID))
+        // Within-category reorder: only active when showing a category pane.
+        // Uses the "reorder:" prefix so it never collides with the clip-to-category
+        // drop on CategorySidePane (which expects a bare integer or "cat:" token).
+        .modifier(CategoryReorderModifier(
+            clipID: clipID,
+            categoryID: categoryID,
+            draggingOverClipID: $draggingOverClipID,
+            store: store
+        ))
         .contextMenu {
             Button("Paste") { onPaste(clip, false) }
             if clip.contentKind == .text {
@@ -621,5 +646,39 @@ struct ClipListView: View {
             // Plain Return follows the primary action (respects copy-only toggle).
             onPrimary(clip)
         }
+    }
+}
+
+// MARK: - Within-category reorder modifier
+
+/// Applied to every clip card in the list. When the current selection is a
+/// category pane, this adds both a "reorder:" draggable token and a drop
+/// destination that calls moveClip. When in History it is a no-op, leaving
+/// the existing clip-to-category drag behavior completely untouched.
+private struct CategoryReorderModifier: ViewModifier {
+    let clipID: Int64
+    let categoryID: Int64?
+    @Binding var draggingOverClipID: Int64?
+    let store: ClipStore
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        guard let categoryID else {
+            // History pane: no reorder, no visual change.
+            return AnyView(content)
+        }
+        return AnyView(
+            content
+                // The "reorder:" prefix distinguishes this from the bare clip-ID
+                // drag that CategorySidePane uses to file clips into categories.
+                .reorderDraggable(id: clipID)
+                .reorderDropDestination(
+                    id: clipID,
+                    draggingOver: $draggingOverClipID
+                ) { draggedID, targetID in
+                    store.moveClip(draggedID, inCategory: categoryID, before: targetID)
+                }
+        )
     }
 }

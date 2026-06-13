@@ -15,6 +15,10 @@ final class ClipStore: ObservableObject {
     @Published private(set) var clips: [Clip] = []
     @Published private(set) var categories: [Category] = []
     @Published private(set) var membership: [Int64: Set<Int64>] = [:]
+    /// Per-category ordered clip ID lists, keyed by categoryID.
+    /// Reflects clip_category.sortOrder so category panes can present clips
+    /// in user-defined order rather than global createdAt order.
+    @Published private(set) var categoryClipOrder: [Int64: [Int64]] = [:]
 
     private var recents: [Clip] = [] {
         didSet { refilter() }
@@ -58,10 +62,25 @@ final class ClipStore: ObservableObject {
             }
         )
 
-        let categoryObservation = ValueObservation.tracking { db -> ([Category], [Int64: Set<Int64>]) in
+        let categoryObservation = ValueObservation.tracking { db -> ([Category], [Int64: Set<Int64>], [Int64: [Int64]]) in
             let categories = try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
             let map = try ClipDatabase.buildMembershipMap(db)
-            return (categories, map)
+            // Load per-category clip order from clip_category.sortOrder.
+            let orderRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT categoryID, clipID
+                    FROM clip_category
+                    ORDER BY categoryID ASC, sortOrder ASC, addedAt DESC
+                    """
+            )
+            var order: [Int64: [Int64]] = [:]
+            for row in orderRows {
+                let catID: Int64 = row["categoryID"]
+                let clipID: Int64 = row["clipID"]
+                order[catID, default: []].append(clipID)
+            }
+            return (categories, map, order)
         }
         categoriesCancellable = categoryObservation.start(
             in: database.dbQueue,
@@ -69,9 +88,10 @@ final class ClipStore: ObservableObject {
             onError: { error in
                 ClippyLog.error("Category observation failed: \(error)", category: ClippyLog.storage)
             },
-            onChange: { [weak self] categories, map in
+            onChange: { [weak self] categories, map, order in
                 self?.categories = categories
                 self?.membership = map
+                self?.categoryClipOrder = order
             }
         )
     }
@@ -152,6 +172,27 @@ final class ClipStore: ObservableObject {
     /// Move one category so it sits just before another (drag-to-reorder).
     func moveCategory(id: Int64, beforeCategoryID: Int64) {
         try? database.moveCategory(id: id, before: beforeCategoryID)
+    }
+
+    /// Clips for a category in user-defined sortOrder. Uses the categoryClipOrder
+    /// map so the result is instantly consistent with the live observation.
+    func clipsForCategory(_ categoryID: Int64) -> [Clip] {
+        guard let orderedIDs = categoryClipOrder[categoryID] else {
+            // Fallback: filter the global clips array before the order map arrives.
+            return clips.filter { membership[$0.id ?? -1]?.contains(categoryID) == true }
+        }
+        let clipByID = Dictionary(uniqueKeysWithValues: clips.compactMap { c -> (Int64, Clip)? in
+            guard let id = c.id else { return nil }
+            return (id, c)
+        })
+        return orderedIDs.compactMap { clipByID[$0] }
+    }
+
+    /// Move a clip to a new position within a category (drag-to-reorder).
+    /// `targetClipID` is the clip the dragged one is dropped onto; pass nil to
+    /// move to the end of the list.
+    func moveClip(_ clipID: Int64, inCategory categoryID: Int64, before targetClipID: Int64?) {
+        try? database.moveClip(clipID, inCategory: categoryID, before: targetClipID)
     }
 
     func delete(_ clip: Clip) {

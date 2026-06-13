@@ -14,6 +14,7 @@ struct ScriptsView: View {
     @State private var running = false
     @State private var result: ScriptResult?
     @State private var confirmRun = false
+    @State private var draggingOverScriptID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,27 +32,102 @@ struct ScriptsView: View {
         }
     }
 
-    // MARK: - Header (picker + add/delete)
+    // MARK: - Header (script list + add/delete)
 
     private var header: some View {
-        HStack {
-            Picker("Script", selection: $selection) {
-                Text("New script").tag(UUID?.none)
-                ForEach(store.scripts) { script in
-                    Text(script.name.isEmpty ? "Untitled" : script.name).tag(Optional(script.id))
-                }
+        VStack(spacing: 0) {
+            // Toolbar row: title + add/delete buttons
+            HStack {
+                Text("Scripts")
+                    .font(.headline)
+                Spacer()
+                Button { newScript() } label: { Image(systemName: "plus") }
+                    .help("New script")
+                Button { deleteSelected() } label: { Image(systemName: "trash") }
+                    .help("Delete script")
+                    .disabled(selection == nil)
             }
-            .labelsHidden()
-            .onChange(of: selection) { select(selection) }
+            .padding(10)
+            Divider()
+            // Reorderable script list replaces the Picker so rows can be dragged.
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    // "New script" row mirrors the old Picker's nil-tag entry.
+                    Button {
+                        newScript()
+                    } label: {
+                        HStack {
+                            Text("New script")
+                                .font(.body)
+                                .foregroundStyle(selection == nil ? Color.accentColor : tokens.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            selection == nil
+                                ? tokens.cardSurface
+                                : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5)
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-            Spacer()
-            Button { newScript() } label: { Image(systemName: "plus") }
-                .help("New script")
-            Button { deleteSelected() } label: { Image(systemName: "trash") }
-                .help("Delete script")
-                .disabled(selection == nil)
+                    ForEach(store.scripts) { script in
+                        Button {
+                            select(script.id)
+                        } label: {
+                            HStack {
+                                Text(script.name.isEmpty ? "Untitled" : script.name)
+                                    .font(.body)
+                                    .foregroundStyle(
+                                        selection == script.id
+                                            ? Color.accentColor
+                                            : tokens.textPrimary
+                                    )
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(script.interpreter.displayName)
+                                    .font(.caption2)
+                                    .foregroundStyle(tokens.textSecondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                selection == script.id
+                                    ? tokens.cardSurface
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(
+                                        selection == script.id
+                                            ? tokens.cardBorder
+                                            : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .reorderDraggable(id: script.id.uuidString)
+                        .reorderDropDestination(
+                            id: script.id.uuidString,
+                            draggingOver: $draggingOverScriptID
+                        ) { draggedStr, targetStr in
+                            if let d = UUID(uuidString: draggedStr),
+                               let t = UUID(uuidString: targetStr) {
+                                store.moveScript(draggedID: d, before: t)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+            .frame(maxHeight: 160)
+            Divider()
         }
-        .padding(10)
     }
 
     // MARK: - Editor

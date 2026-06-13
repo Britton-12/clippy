@@ -70,6 +70,10 @@ struct Script: Identifiable, Codable, Equatable {
     var outputToClipboard: Bool
     var createdAt: Date
     var updatedAt: Date
+    /// User-defined display order. Lower values appear first. Defaults to 0 so
+    /// JSON saved by older builds (which have no sortOrder key) migrates cleanly
+    /// via `decodeIfPresent ?? 0`.
+    var sortOrder: Int
 
     init(id: UUID = UUID(),
          name: String,
@@ -78,7 +82,8 @@ struct Script: Identifiable, Codable, Equatable {
          feedsClipboard: Bool = false,
          outputToClipboard: Bool = false,
          createdAt: Date = Date(),
-         updatedAt: Date = Date()) {
+         updatedAt: Date = Date(),
+         sortOrder: Int = 0) {
         self.id = id
         self.name = name
         self.interpreter = interpreter
@@ -87,6 +92,28 @@ struct Script: Identifiable, Codable, Equatable {
         self.outputToClipboard = outputToClipboard
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.sortOrder = sortOrder
+    }
+
+    // MARK: - Codable with migration
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, interpreter, body, feedsClipboard, outputToClipboard
+        case createdAt, updatedAt, sortOrder
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        interpreter = try c.decode(ScriptInterpreter.self, forKey: .interpreter)
+        body = try c.decode(String.self, forKey: .body)
+        feedsClipboard = try c.decode(Bool.self, forKey: .feedsClipboard)
+        outputToClipboard = try c.decode(Bool.self, forKey: .outputToClipboard)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        // Old JSON has no sortOrder; default to 0 so migration backfill runs in load().
+        sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
     }
 }
 

@@ -26,7 +26,9 @@ final class ScriptStore: ObservableObject {
     // MARK: - CRUD
 
     func add(_ script: Script) {
-        scripts.append(script)
+        var s = script
+        s.sortOrder = (scripts.map(\.sortOrder).max() ?? -1) + 1
+        scripts.append(s)
         save()
     }
 
@@ -47,6 +49,23 @@ final class ScriptStore: ObservableObject {
         scripts.first { $0.id == id }
     }
 
+    /// Reorder: move the script identified by `draggedID` to just before the
+    /// script identified by `targetID`. Resequences all sortOrder values
+    /// gap-free and persists.
+    func moveScript(draggedID: UUID, before targetID: UUID) {
+        guard draggedID != targetID,
+              let fromIndex = scripts.firstIndex(where: { $0.id == draggedID }),
+              scripts.contains(where: { $0.id == targetID }) else { return }
+        var reordered = scripts
+        let item = reordered.remove(at: fromIndex)
+        let insertAt = reordered.firstIndex(where: { $0.id == targetID }) ?? reordered.endIndex
+        reordered.insert(item, at: insertAt)
+        // Resequence gap-free so sortOrder always reflects array position.
+        for i in reordered.indices { reordered[i].sortOrder = i }
+        scripts = reordered
+        save()
+    }
+
     // MARK: - Persistence
 
     private func load() {
@@ -54,7 +73,22 @@ final class ScriptStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileURL),
               let decoded = try? decoder.decode([Script].self, from: data) else { return }
-        scripts = decoded.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        // Migration: if all sortOrder values are 0 (first load after upgrade from a
+        // build without sortOrder), backfill sequential values from the current
+        // alphabetical order so the visible list does not jump.
+        let allZero = decoded.allSatisfy { $0.sortOrder == 0 }
+        if allZero && decoded.count > 1 {
+            let alphabetical = decoded.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            scripts = alphabetical.enumerated().map { idx, s in
+                var s = s; s.sortOrder = idx; return s
+            }
+            save()
+        } else {
+            scripts = decoded.sorted { $0.sortOrder < $1.sortOrder }
+        }
     }
 
     private func save() {

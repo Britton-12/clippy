@@ -135,6 +135,34 @@ final class ClipDatabase {
                 t.column("userTitle")
             }
         }
+        migrator.registerMigration("v5-clip-category-sort-order") { db in
+            // Add per-category clip ordering to the junction table. SQLite's
+            // ALTER TABLE does not support NOT NULL without a default on
+            // existing tables, so DEFAULT 0 is required here.
+            try db.execute(sql: """
+                ALTER TABLE clip_category ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0
+                """)
+            // Backfill: within each category, assign sortOrder by addedAt DESC
+            // so the most-recently-added clip appears first (matching the
+            // pre-reorder visible order). Gap-free 0-based integers per category.
+            try db.execute(sql: """
+                UPDATE clip_category
+                SET sortOrder = (
+                    SELECT COUNT(*) - 1 - ranked.rn
+                    FROM (
+                        SELECT clipID, categoryID,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY categoryID
+                                   ORDER BY addedAt DESC
+                               ) - 1 AS rn
+                        FROM clip_category AS inner_cc
+                    ) AS ranked
+                    WHERE ranked.clipID = clip_category.clipID
+                      AND ranked.categoryID = clip_category.categoryID
+                )
+                """)
+            try db.create(indexOn: "clip_category", columns: ["categoryID", "sortOrder"])
+        }
         return migrator
     }
 
