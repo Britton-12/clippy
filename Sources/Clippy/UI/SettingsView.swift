@@ -276,6 +276,39 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Behavior") {
+                Toggle("Hide panel when clicking away", isOn: $settings.hideOnClickAway)
+                    .help("Close the panel automatically when you click into another app. Off by default: the panel stays open until you press Escape, use the hotkey, or pick a clip.")
+                Text("Off by default: the panel stays open until you dismiss it explicitly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Hide panel after pasting", isOn: $settings.hideAfterPaste)
+                    .help("Close the panel after a paste, primary-click, or Send as keystrokes action. Turn off to keep the panel open for rapid multi-paste workflows.")
+                Text("Turn off to paste multiple clips without reopening the panel each time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Escape closes the panel", isOn: $settings.hideOnEscape)
+                    .help("Pressing Escape dismisses the panel. Turn off if you want Escape to cancel text in the search field without closing the panel.")
+
+                Picker("Panel window level", selection: $settings.panelFloatLevel) {
+                    ForEach(PanelFloatLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                .help("Controls how the panel stacks relative to other windows. \"Always on top\" is the default and keeps it above every app window.")
+                Text("\"Always on top\" floats above every window. \"Normal\" lets other windows cover the panel.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Pin panel open", isOn: $settings.panelPinned)
+                    .help("Suppress all auto-hide triggers (click-away, after-paste, Escape) so the panel stays open regardless of other behavior settings. Use the hotkey or the X button to close it manually.")
+                Text("When pinned, the panel ignores all auto-hide rules. Close it manually with the hotkey.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Startup") {
                 Toggle("Launch Clippy at login", isOn: $launchAtLogin)
                     .disabled(!isRunningFromBundle)
@@ -999,11 +1032,16 @@ private struct AISettingsTab: View {
     }
 
     private func refreshInstalledClients() {
-        var found = Set<McpClient>()
-        for client in McpClient.allCases {
-            if McpInstallService.isInstalled(client) { found.insert(client) }
+        // isInstalled(.claudeCode) can spawn a login shell ("zsh -l -c which claude")
+        // and run "claude mcp list", each blocking for hundreds of ms. Probe off
+        // the main thread so opening this tab never freezes the window.
+        Task.detached(priority: .utility) {
+            var found = Set<McpClient>()
+            for client in McpClient.allCases where McpInstallService.isInstalled(client) {
+                found.insert(client)
+            }
+            await MainActor.run { [found] in mcpInstalledClients = found }
         }
-        mcpInstalledClients = found
     }
 
     private func mcpTest() {

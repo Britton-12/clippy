@@ -119,7 +119,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 cardSurface: hex("#2C313A"), cardBorder: hex("#3B4048"),
                 headerBar: hex("#21252B"), footerBar: hex("#21252B"),
                 sidebar: hex("#21252B"), scrollbar: hex("#4B5263"),
-                textPrimary: hex("#ABB2BF"), textSecondary: hex("#828997"),
+                // #9299A8 lifts this from 3.98:1 to 4.90:1 on the panel background,
+                // meeting WCAG AA (4.5:1) without making secondary text feel heavy.
+                textPrimary: hex("#ABB2BF"), textSecondary: hex("#9299A8"),
                 accent: hex("#61AFEF"), isDark: true
             )
         case .solarizedDark:
@@ -211,7 +213,11 @@ enum Theme {
             sidebar: Color(nsColor: .underPageBackgroundColor),
             scrollbar: Color(nsColor: .tertiaryLabelColor),
             textPrimary: Color(nsColor: .labelColor),
-            textSecondary: Color(nsColor: .secondaryLabelColor),
+            // secondaryLabelColor resolves to ~#8C8C8C in light mode (3.36:1 on white),
+            // failing WCAG AA. In light mode, use a concrete gray (#6E6E6E, 5.10:1 on
+            // white) that reads as secondary without being heavy. Dark mode keeps the
+            // semantic color, which resolves to ~#8E8E9A and already passes at ~5.26:1.
+            textSecondary: dark ? Color(nsColor: .secondaryLabelColor) : Color(themeHex: "#6E6E6E"),
             accent: s.accentColor,
             isDark: dark
         )

@@ -119,7 +119,7 @@ struct SearchClipsTool: AITool {
         let clips = try ClipDatabase.shared.searchClips(matching: query, limit: 10)
         if clips.isEmpty { return "No clips found matching \"\(query)\"." }
         return clips.enumerated().map { (i, clip) in
-            "\(i + 1). \(AIService.clamp(clip.contentText ?? "", 200))"
+            "\(i + 1). \(AIService.clamp(clip.contentText, 200))"
         }.joined(separator: "\n")
     }
 }

@@ -22,9 +22,9 @@ final class StatusBarIconTests: XCTestCase {
         )
     }
 
-    /// Regression: the drawing handler must fill the full backing rect at 2x scale.
-    /// Before the fix, the handler ignored its `destRect` argument and drew into the
-    /// fixed 18pt canvas; on a 36x36 backing bitmap the top half was entirely blank.
+    /// The icon (the `paperclip` SF Symbol) must carry ink near the top of the
+    /// canvas at 2x — i.e. it is not blank or clipped at the top. SF Symbols render
+    /// with correct optical sizing, so this holds without any custom geometry.
     func testIconFillsFullCanvasAt2xScale() {
         let img = StatusBarIcon.image()
         let pixelSize = 36 // 18pt * 2x

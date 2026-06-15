@@ -8,7 +8,9 @@ final class PastePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
-        // Escape anywhere in the panel closes it.
+        let settings = AppSettings.shared
+        // Pinned panel ignores all auto-hide triggers, including Escape.
+        guard !settings.panelPinned, settings.hideOnEscape else { return }
         orderOut(nil)
     }
 }

@@ -14,7 +14,7 @@ struct SelectAllTextField: NSViewRepresentable {
     var onCommit: (String) -> Void
     var onCancel: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator() -> Coordinator { Coordinator(onCommit: onCommit, onCancel: onCancel) }
 
     func makeNSView(context: Context) -> FocusSelectTextField {
         let field = FocusSelectTextField(string: initialText)
@@ -39,25 +39,39 @@ struct SelectAllTextField: NSViewRepresentable {
         // Do not overwrite stringValue here: that would clobber the user's edits.
         field.font = font
         field.textColor = textColor
+        // Keep coordinator closures current in case the caller re-renders with new
+        // captures (e.g., a closure that closes over an @State value).
+        context.coordinator.onCommit = onCommit
+        context.coordinator.onCancel = onCancel
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
-        private let parent: SelectAllTextField
+        // Store only the closures, not the parent struct. The parent is a value
+        // type (struct), so holding it directly would copy its closure properties
+        // anyway; keeping just the closures is explicit about what the Coordinator
+        // actually needs and avoids any latent issue if the struct ever gains a
+        // reference-type stored property that a caller captures. `var` so
+        // updateNSView can refresh them if the caller provides new closures.
+        var onCommit: (String) -> Void
+        var onCancel: () -> Void
         /// True once Return or Esc handled the edit, so the end-editing
         /// notification that follows does not commit a second time.
         private var resolved = false
 
-        init(_ parent: SelectAllTextField) { self.parent = parent }
+        init(onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+            self.onCommit = onCommit
+            self.onCancel = onCancel
+        }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 resolved = true
-                parent.onCommit(control.stringValue)
+                onCommit(control.stringValue)
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 resolved = true
-                parent.onCancel()
+                onCancel()
                 return true
             default:
                 return false
@@ -68,7 +82,7 @@ struct SelectAllTextField: NSViewRepresentable {
         func controlTextDidEndEditing(_ note: Notification) {
             guard !resolved, let field = note.object as? NSTextField else { return }
             resolved = true
-            parent.onCommit(field.stringValue)
+            onCommit(field.stringValue)
         }
     }
 }

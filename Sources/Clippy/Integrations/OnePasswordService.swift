@@ -125,7 +125,11 @@ struct OnePasswordService {
         return (path, base)
     }
 
-    static var isInstalled: Bool { executablePath() != nil }
+    // Cached for the process lifetime: the settings UI reads this several times
+    // per render, and the CLI is not installed or removed mid-session in practice.
+    // Caching turns a dozen filesystem stats per render into one lookup.
+    private static let installedCache: Bool = executablePath() != nil
+    static var isInstalled: Bool { installedCache }
 
     private func op(_ args: [String]) async throws -> String {
         guard let _ = Self.executablePath() else { throw OnePasswordError.notInstalled }

@@ -97,25 +97,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panelController.onPaste = { [weak self] clip, asPlainText in
             guard let self else { return }
-            self.panelController.hide()
+            // hideAfterPaste=false lets the panel stay open for rapid multi-paste.
+            // panelPinned suppresses all auto-hide triggers.
+            let s = AppSettings.shared
+            if s.hideAfterPaste && !s.panelPinned { self.panelController.hide() }
+            self.panelController.restoreFocusToPreviousApp()
             self.pasteService.paste(clip, asPlainText: asPlainText)
         }
         panelController.onPrimary = { [weak self] clip in
             guard let self else { return }
-            self.panelController.hide()
-            if AppSettings.shared.clickCopyOnly {
-                self.pasteService.copy(clip, asPlainText: AppSettings.shared.pastePlainTextByDefault)
+            let s = AppSettings.shared
+            if s.hideAfterPaste && !s.panelPinned { self.panelController.hide() }
+            if s.clickCopyOnly {
+                self.pasteService.copy(clip, asPlainText: s.pastePlainTextByDefault)
             } else {
-                self.pasteService.paste(clip, asPlainText: AppSettings.shared.pastePlainTextByDefault)
+                self.panelController.restoreFocusToPreviousApp()
+                self.pasteService.paste(clip, asPlainText: s.pastePlainTextByDefault)
             }
         }
         panelController.onSendKeystrokes = { [weak self] clip in
             guard let self else { return }
-            self.panelController.hide()
-            // Write to clipboard so the user has a copy-fallback, then type.
+            let s = AppSettings.shared
+            if s.hideAfterPaste && !s.panelPinned { self.panelController.hide() }
+            // Hand keyboard focus back to the target app before typing, otherwise
+            // the unicode key events land on no first responder and the system
+            // beeps once per character. Write to clipboard too as a copy-fallback.
+            self.panelController.restoreFocusToPreviousApp()
             self.pasteService.copy(clip, asPlainText: true)
             let text = clip.contentText
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            // Slightly longer than the paste delay: re-activation has to settle
+            // and the target's text field must regain first responder first.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.keystrokeService.type(text)
             }
         }
@@ -284,7 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             settingsWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
+        // NSApp.activate(ignoringOtherApps:) deprecated in macOS 14; use activate().
+        NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
@@ -295,7 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
-        NSApp.activate(ignoringOtherApps: true)
+        // NSApp.activate(ignoringOtherApps:) deprecated in macOS 14; use activate().
+        NSApp.activate()
         if alert.runModal() == .alertFirstButtonReturn {
             try? database.deleteUnclassifiedClips()
         }
@@ -409,7 +423,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .joined(separator: "\n--- stderr ---\n")
         alert.informativeText = String(body.prefix(1500)).isEmpty ? "No output." : String(body.prefix(1500))
         alert.alertStyle = result.succeeded ? .informational : .warning
-        NSApp.activate(ignoringOtherApps: true)
+        // NSApp.activate(ignoringOtherApps:) deprecated in macOS 14; use activate().
+        NSApp.activate()
         alert.runModal()
     }
 

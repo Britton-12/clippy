@@ -19,6 +19,26 @@ enum PanelPositionMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where the panel sits in the macOS window stack.
+/// alwaysOnTop: .statusBar level + isFloatingPanel (current default, floats above every app window).
+/// aboveNormalWindows: .floating level + isFloatingPanel (floats above normal windows, below status bar).
+/// normalOrder: .normal level, not floating (respects app z-order, stays behind full-screen chrome).
+enum PanelFloatLevel: String, CaseIterable, Identifiable {
+    case alwaysOnTop
+    case aboveNormalWindows
+    case normalOrder
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .alwaysOnTop: return "Always on top"
+        case .aboveNormalWindows: return "Above normal windows"
+        case .normalOrder: return "Normal window order"
+        }
+    }
+}
+
 /// Per-character pacing for the "send keystrokes" action. Faster feels instant
 /// but can drop characters in slow or remote targets; deliberate is the safest.
 enum KeystrokeSpeed: String, CaseIterable, Identifiable {
@@ -126,6 +146,12 @@ final class AppSettings: ObservableObject {
         // MCP integration
         static let mcpEnabled = "mcpEnabled"
         static let mcpPort = "mcpPort"
+        // Panel behavior
+        static let hideOnClickAway = "hideOnClickAway"
+        static let hideAfterPaste = "hideAfterPaste"
+        static let hideOnEscape = "hideOnEscape"
+        static let panelFloatLevel = "panelFloatLevel"
+        static let panelPinned = "panelPinned"
     }
 
     private let defaults: UserDefaults
@@ -341,6 +367,38 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(mcpPort, forKey: Keys.mcpPort) }
     }
 
+    // MARK: - Panel behavior
+
+    /// When true, the panel hides if the user clicks another app (key resignation).
+    /// Default false: preserves the existing always-persistent behavior so existing
+    /// users see no change until they opt in.
+    @Published var hideOnClickAway: Bool {
+        didSet { defaults.set(hideOnClickAway, forKey: Keys.hideOnClickAway) }
+    }
+    /// When true, the panel hides after a paste or keystroke action (current behavior).
+    /// Default true: preserves existing behavior; set false to keep the panel open
+    /// for rapid multi-paste workflows.
+    @Published var hideAfterPaste: Bool {
+        didSet { defaults.set(hideAfterPaste, forKey: Keys.hideAfterPaste) }
+    }
+    /// When true, pressing Escape closes the panel (current behavior).
+    /// Default true: preserves existing behavior.
+    @Published var hideOnEscape: Bool {
+        didSet { defaults.set(hideOnEscape, forKey: Keys.hideOnEscape) }
+    }
+    /// Window level and floating behavior for the panel. alwaysOnTop is the
+    /// current default (.statusBar level); other values trade visibility for
+    /// less intrusion into normal app z-order.
+    @Published var panelFloatLevel: PanelFloatLevel {
+        didSet { defaults.set(panelFloatLevel.rawValue, forKey: Keys.panelFloatLevel) }
+    }
+    /// When true, suppresses all auto-hide triggers (click-away, after-paste,
+    /// Escape) so the panel stays open regardless of other behavior settings.
+    /// Intended as a quick "pin" override, default false.
+    @Published var panelPinned: Bool {
+        didSet { defaults.set(panelPinned, forKey: Keys.panelPinned) }
+    }
+
     /// The resolved token table for the active theme. Views read this.
     var theme: ThemeTokens { Theme.tokens(self) }
 
@@ -463,6 +521,12 @@ final class AppSettings: ObservableObject {
             Keys.keystrokeWarnThreshold: 2000,
             Keys.mcpEnabled: false,
             Keys.mcpPort: 51764,
+            // Panel behavior: all defaults preserve the pre-existing behavior exactly.
+            Keys.hideOnClickAway: false,
+            Keys.hideAfterPaste: true,
+            Keys.hideOnEscape: true,
+            Keys.panelFloatLevel: PanelFloatLevel.alwaysOnTop.rawValue,
+            Keys.panelPinned: false,
         ])
         positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
         panelWidth = defaults.double(forKey: Keys.panelWidth)
@@ -537,6 +601,11 @@ final class AppSettings: ObservableObject {
             let stored = defaults.integer(forKey: Keys.mcpPort)
             return (stored >= 1024 && stored <= 65535) ? stored : 51764
         }()
+        hideOnClickAway = defaults.bool(forKey: Keys.hideOnClickAway)
+        hideAfterPaste = defaults.bool(forKey: Keys.hideAfterPaste)
+        hideOnEscape = defaults.bool(forKey: Keys.hideOnEscape)
+        panelFloatLevel = PanelFloatLevel(rawValue: defaults.string(forKey: Keys.panelFloatLevel) ?? "") ?? .alwaysOnTop
+        panelPinned = defaults.bool(forKey: Keys.panelPinned)
     }
 
     /// Resolve the stored sound id, migrating the legacy classic-enum key the

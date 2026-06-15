@@ -24,7 +24,8 @@ final class EditorWindowController {
         window.center()
         self.window = window
 
-        NSApp.activate(ignoringOtherApps: true)
+        // NSApp.activate(ignoringOtherApps:) deprecated in macOS 14; use activate().
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
 

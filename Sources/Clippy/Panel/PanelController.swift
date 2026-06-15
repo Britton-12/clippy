@@ -14,6 +14,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     var onEdit: ((Clip) -> Void)?
     var onOpenSettings: (() -> Void)?
 
+    /// The app that was frontmost when the panel last opened. Synthetic paste
+    /// and keystroke events need that app's text field to be the first responder;
+    /// re-activating it before sending restores focus the panel briefly took.
+    private(set) var previousApp: NSRunningApplication?
+
     var isVisible: Bool { panel?.isVisible ?? false }
 
     init(store: ClipStore) {
@@ -29,7 +34,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func show() {
+        // Remember who had focus before the panel grabs key status, so the send
+        // paths can hand keyboard focus back to that app. Skip Clippy itself
+        // (e.g. when the panel is re-shown while already frontmost).
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previousApp = front
+        }
+
         let panel = ensurePanel()
+        // Re-apply level/float each show in case the user changed the setting
+        // since the panel was last created.
+        applyFloatLevel(to: panel)
         let size = NSSize(width: settings.panelWidth, height: settings.panelHeight)
 
         // Fresh root view per presentation: resets search text, selection,
@@ -72,6 +88,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
     }
 
+    /// Hand keyboard focus back to the app that was frontmost when the panel
+    /// opened. The panel is a nonactivating key window; after it orders out the
+    /// target window does not always reclaim first responder on its own, so
+    /// synthetic key events would otherwise land nowhere and beep. Re-activating
+    /// the app forces its text field back to first responder before we type.
+    func restoreFocusToPreviousApp() {
+        guard let previousApp,
+              previousApp.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        previousApp.activate()
+    }
+
     /// Debug aid for UI smoke tests: render the panel's content into a PNG.
     /// Works even when the panel lost key status, since it draws the view
     /// hierarchy directly instead of capturing the screen.
@@ -87,11 +114,34 @@ final class PanelController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidResignKey(_ notification: Notification) {
-        // Panel is intentionally persistent: focus loss does not close it.
-        // The only valid close triggers are item click, hotkey toggle, and Escape.
+        // hideOnClickAway opt-in: hide when focus moves to another app.
+        // panelPinned suppresses all auto-hide triggers, including this one.
+        // Default (hideOnClickAway=false) preserves the original persistent behavior.
+        guard settings.hideOnClickAway, !settings.panelPinned else { return }
+        hide()
     }
 
     // MARK: - Construction and placement
+
+    /// Applies the user's panelFloatLevel preference to a panel instance.
+    /// alwaysOnTop: .statusBar (25) + isFloatingPanel — the original behavior, floats
+    ///   above every normal app window and full-screen chrome.
+    /// aboveNormalWindows: .floating + isFloatingPanel — above normal windows, but
+    ///   below status bar and menu extras.
+    /// normalOrder: .normal + not floating — participates in standard z-order.
+    private func applyFloatLevel(to panel: PastePanel) {
+        switch settings.panelFloatLevel {
+        case .alwaysOnTop:
+            panel.level = .statusBar
+            panel.isFloatingPanel = true
+        case .aboveNormalWindows:
+            panel.level = .floating
+            panel.isFloatingPanel = true
+        case .normalOrder:
+            panel.level = .normal
+            panel.isFloatingPanel = false
+        }
+    }
 
     private func ensurePanel() -> PastePanel {
         if let panel { return panel }
@@ -101,11 +151,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: true
         )
-        // .statusBar (25) floats above every normal app window and above full-screen
-        // app chrome, which satisfies the "above everything" requirement without
-        // covering the system screensaver.
-        panel.level = .statusBar
-        panel.isFloatingPanel = true
+        // Level and float behavior are applied per-show so live changes to
+        // panelFloatLevel take effect the next time the panel opens.
+        applyFloatLevel(to: panel)
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
