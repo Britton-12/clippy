@@ -148,6 +148,7 @@ final class AppSettings: ObservableObject {
         static let mcpPort = "mcpPort"
         // Panel behavior
         static let hideOnClickAway = "hideOnClickAway"
+        static let allowMultipleCategories = "allowMultipleCategories"
         static let hideAfterPaste = "hideAfterPaste"
         static let hideOnEscape = "hideOnEscape"
         static let panelFloatLevel = "panelFloatLevel"
@@ -375,6 +376,12 @@ final class AppSettings: ObservableObject {
     @Published var hideOnClickAway: Bool {
         didSet { defaults.set(hideOnClickAway, forKey: Keys.hideOnClickAway) }
     }
+    /// When true, more than one category can be selected at once in the panel.
+    /// Default false: preserves the existing single-selection behavior so existing
+    /// users see no change until they opt in.
+    @Published var allowMultipleCategories: Bool {
+        didSet { defaults.set(allowMultipleCategories, forKey: Keys.allowMultipleCategories) }
+    }
     /// When true, the panel hides after a paste or keystroke action (current behavior).
     /// Default true: preserves existing behavior; set false to keep the panel open
     /// for rapid multi-paste workflows.
@@ -523,6 +530,7 @@ final class AppSettings: ObservableObject {
             Keys.mcpPort: 51764,
             // Panel behavior: all defaults preserve the pre-existing behavior exactly.
             Keys.hideOnClickAway: false,
+            Keys.allowMultipleCategories: false,
             Keys.hideAfterPaste: true,
             Keys.hideOnEscape: true,
             Keys.panelFloatLevel: PanelFloatLevel.alwaysOnTop.rawValue,
@@ -602,6 +610,7 @@ final class AppSettings: ObservableObject {
             return (stored >= 1024 && stored <= 65535) ? stored : 51764
         }()
         hideOnClickAway = defaults.bool(forKey: Keys.hideOnClickAway)
+        allowMultipleCategories = defaults.bool(forKey: Keys.allowMultipleCategories)
         hideAfterPaste = defaults.bool(forKey: Keys.hideAfterPaste)
         hideOnEscape = defaults.bool(forKey: Keys.hideOnEscape)
         panelFloatLevel = PanelFloatLevel(rawValue: defaults.string(forKey: Keys.panelFloatLevel) ?? "") ?? .alwaysOnTop
