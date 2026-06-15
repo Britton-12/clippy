@@ -18,6 +18,19 @@ struct ClipListView: View {
 
     @State private var selection: PanelSelection = .history
     @State private var selectedIndex = 0
+    /// Explicit multi-selection by clip ID. Empty means "no multi-selection";
+    /// in that case the keyboard-anchored `selectedIndex`/`selectedClip` is the
+    /// single active clip. Plain click clears this back to empty.
+    @State private var selectedClipIDs: Set<Int64> = []
+
+    /// The clips batch actions operate on: the explicit multi-selection if any,
+    /// otherwise the single keyboard-anchored clip.
+    private var actionableClips: [Clip] {
+        if selectedClipIDs.isEmpty {
+            return selectedClip.map { [$0] } ?? []
+        }
+        return visibleClips.filter { clip in clip.id.map { selectedClipIDs.contains($0) } ?? false }
+    }
     @State private var categoryCreationClip: Clip?
     /// The ID of the clip whose title is currently being edited inline.
     @State private var renamingClipID: Int64?
@@ -367,9 +380,15 @@ struct ClipListView: View {
     private func card(for clip: Clip, at index: Int) -> some View {
         let clipID = clip.id ?? -1
         let categoryID = activeCategoryID
+        // Highlight reflects the explicit multi-selection when one exists;
+        // otherwise it tracks the single keyboard-anchored row.
+        let isSelected: Bool = {
+            if selectedClipIDs.isEmpty { return index == selectedIndex }
+            return clip.id.map { selectedClipIDs.contains($0) } ?? false
+        }()
         return ClipCardView(
             clip: clip,
-            isSelected: index == selectedIndex,
+            isSelected: isSelected,
             isPinned: store.isPinned(clip),
             categoryColors: store.categories
                 .filter { category in
@@ -382,7 +401,10 @@ struct ClipListView: View {
                 get: { renamingClipID == clip.id },
                 set: { active in renamingClipID = active ? clip.id : nil }
             ),
-            onActivate: { onPrimary(clip) },
+            // The card's button action is now a plain single-click select.
+            // The actual paste/activate moved to the double-click gesture below
+            // so single-click selects and double-click pastes.
+            onActivate: { handleRowClick(clip, at: index, modifiers: []) },
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onSendKeystrokes: { requestSendKeystrokes(clip) },
@@ -392,6 +414,25 @@ struct ClipListView: View {
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
+        // Click semantics layered over the card's inner Button (whose plain
+        // single-click action selects). These high-priority gestures intercept
+        // the modified and double clicks before the Button's action fires:
+        //   Cmd-click   -> toggle this clip in the multi-selection
+        //   Shift-click -> extend the multi-selection range from the anchor
+        //   Double-click-> paste/activate (the old single-click behavior)
+        // Keyboard Return-to-paste is unchanged (see pasteSelected).
+        .highPriorityGesture(
+            TapGesture().modifiers(.command)
+                .onEnded { handleRowClick(clip, at: index, modifiers: .command) }
+        )
+        .highPriorityGesture(
+            TapGesture().modifiers(.shift)
+                .onEnded { handleRowClick(clip, at: index, modifiers: .shift) }
+        )
+        .highPriorityGesture(
+            TapGesture(count: 2)
+                .onEnded { onPrimary(clip) }
+        )
         // Drag payload is managed entirely by CategoryReorderModifier so that
         // only one .draggable is ever applied to this view. Two stacked
         // .draggable modifiers on the same view cause SwiftUI to use only the
@@ -638,6 +679,31 @@ struct ClipListView: View {
     private func moveSelection(by delta: Int) {
         guard !visibleClips.isEmpty else { return }
         selectedIndex = max(0, min(visibleClips.count - 1, selectedIndex + delta))
+    }
+
+    /// Single-click selection with macOS modifier semantics:
+    /// - Cmd: toggle this clip in/out of the multi-selection.
+    /// - Shift: extend the multi-selection from the anchor (`selectedIndex`) to here.
+    /// - Plain: clear the multi-selection and anchor on this clip.
+    /// In every case `selectedIndex` is moved to the clicked row so the keyboard
+    /// anchor and Return-to-paste stay in sync with the mouse.
+    private func handleRowClick(_ clip: Clip, at index: Int, modifiers: EventModifiers) {
+        guard let id = clip.id else { return }
+        if modifiers.contains(.command) {
+            if selectedClipIDs.contains(id) { selectedClipIDs.remove(id) } else { selectedClipIDs.insert(id) }
+            selectedIndex = index
+        } else if modifiers.contains(.shift) {
+            guard !visibleClips.isEmpty else { return }
+            let upper = visibleClips.count - 1
+            let lo = max(0, min(selectedIndex, index))
+            let hi = min(upper, max(selectedIndex, index))
+            let rangeIDs = visibleClips[lo...hi].compactMap { $0.id }
+            selectedClipIDs.formUnion(rangeIDs)
+            selectedIndex = index
+        } else {
+            selectedClipIDs = []          // plain click clears multi-select
+            selectedIndex = index
+        }
     }
 
     private func pasteSelected(shiftHeld: Bool) {
