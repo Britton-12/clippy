@@ -274,6 +274,8 @@ private struct GeneralSettingsTab: View {
                 Text("Clips in categories never count against the cap and survive Clear Unpinned History.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Allow a clip in multiple categories", isOn: $settings.allowMultipleCategories)
+                    .help("Off by default: filing a clip into a category removes it from any other category, so each clip lives in exactly one. On: a clip can belong to several categories at once.")
             }
 
             Section("Behavior") {
