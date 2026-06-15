@@ -155,7 +155,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // panelFloatLevel take effect the next time the panel opens.
         applyFloatLevel(to: panel)
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true

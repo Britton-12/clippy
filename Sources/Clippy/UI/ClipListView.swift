@@ -75,6 +75,13 @@ struct ClipListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PanelHeaderView(
+                isPinned: settings.panelPinned,
+                onTogglePin: { settings.panelPinned.toggle() },
+                onOpenSettings: onOpenSettings,
+                onClose: onClose
+            )
+            Divider()
             searchBar
             Divider()
             GeometryReader { geo in
@@ -274,14 +281,6 @@ struct ClipListView: View {
                     selection = .category(categoryID)
                     return .handled
                 }
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(tokens.textSecondary)
-            }
-            .buttonStyle(.borderless)
-            .help("Clippy settings")
-            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
