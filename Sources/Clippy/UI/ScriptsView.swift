@@ -74,42 +74,44 @@ struct ScriptsView: View {
                     .buttonStyle(.plain)
 
                     ForEach(store.scripts) { script in
-                        Button {
-                            select(script.id)
-                        } label: {
-                            HStack {
-                                Text(script.name.isEmpty ? "Untitled" : script.name)
-                                    .font(.body)
-                                    .foregroundStyle(
-                                        selection == script.id
-                                            ? Color.accentColor
-                                            : tokens.textPrimary
-                                    )
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(script.interpreter.displayName)
-                                    .font(.caption2)
-                                    .foregroundStyle(tokens.textSecondary)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(
-                                selection == script.id
-                                    ? tokens.cardSurface
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 5)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(
-                                        selection == script.id
-                                            ? tokens.cardBorder
-                                            : Color.clear,
-                                        lineWidth: 1
-                                    )
-                            )
+                        // Plain HStack instead of Button so that .draggable
+                        // can start a drag on macOS. A Button's tap gesture
+                        // takes priority over .draggable on macOS 14, making
+                        // drags nearly impossible to initiate. onTapGesture
+                        // fires on click without competing with drag recognition.
+                        HStack {
+                            Text(script.name.isEmpty ? "Untitled" : script.name)
+                                .font(.body)
+                                .foregroundStyle(
+                                    selection == script.id
+                                        ? Color.accentColor
+                                        : tokens.textPrimary
+                                )
+                                .lineLimit(1)
+                            Spacer()
+                            Text(script.interpreter.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(tokens.textSecondary)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            selection == script.id
+                                ? tokens.cardSurface
+                                : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .strokeBorder(
+                                    selection == script.id
+                                        ? tokens.cardBorder
+                                        : Color.clear,
+                                    lineWidth: 1
+                                )
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { select(script.id) }
                         .reorderDraggable(id: script.id.uuidString)
                         .reorderDropDestination(
                             id: script.id.uuidString,

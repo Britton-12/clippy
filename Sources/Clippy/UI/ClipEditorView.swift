@@ -31,6 +31,7 @@ private struct TextClipEditor: View {
     @StateObject private var ai = AIActionRunner()
     @State private var text: String
     @State private var title: String
+    @State private var statusMessage: String?
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -64,6 +65,12 @@ private struct TextClipEditor: View {
                     .font(PanelTypography.metadata(settings))
                     .foregroundStyle(tokens.textSecondary)
                     .accessibilityLabel("\(text.unicodeScalars.count) Unicode scalars, \(wordCount) words, \(lineCount) lines")
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(PanelTypography.metadata(settings))
+                        .foregroundStyle(tokens.accent)
+                        .transition(.opacity)
+                }
                 Spacer()
                 Button("Cancel", role: .cancel) { onClose() }
                     .keyboardShortcut(.cancelAction)
@@ -115,14 +122,69 @@ private struct TextClipEditor: View {
 
     private func apply(_ proposal: AIProposal) {
         switch proposal.kind {
-        case .title: title = proposal.proposed
-        case .rewrite, .summary, .newClip: text = proposal.proposed
-        case .category: break
+        case .title:
+            // Preview: store in @State so it writes on Save.
+            title = proposal.proposed
+        case .rewrite, .summary:
+            // Preview: store in @State so it writes on Save.
+            text = proposal.proposed
+        case .newClip:
+            // Side effect applied immediately: insert as a fresh history entry.
+            // Does NOT overwrite the clip currently open in the editor.
+            store.saveScriptOutput(proposal.proposed)
+            showStatus("New clip created")
         case .copyToClipboard:
-            // The ClipListView handler already wrote to NSPasteboard; nothing
-            // to do in the editor. The case must be handled to keep the switch
-            // exhaustive as Kind grows.
-            break
+            // Side effect applied immediately: write result to the general pasteboard.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(proposal.proposed, forType: .string)
+            showStatus("Copied to clipboard")
+        case .category:
+            // Resolve the proposed name to a Category and assign the clip immediately.
+            // No Save required — addClip(id:toCategory:) is a direct store mutation.
+            assignClipToCategory(named: proposal.proposed)
+        }
+    }
+
+    /// Assigns the open clip to a category whose name matches `name`
+    /// (case-insensitive, trimmed). Creates a new category with default
+    /// appearance if no match exists, mirroring CategoryEditorView's defaults.
+    /// Takes effect immediately via store.addClip(id:toCategory:).
+    private func assignClipToCategory(named name: String) {
+        guard let clipID = clip.id else {
+            showStatus("Could not assign: clip has no ID")
+            return
+        }
+        let target = name.trimmingCharacters(in: .whitespaces)
+        // Find an existing category by name (case-insensitive).
+        if let existing = store.categories.first(where: {
+            $0.name.compare(target, options: .caseInsensitive) == .orderedSame
+        }), let catID = existing.id {
+            store.addClip(id: clipID, toCategory: catID)
+            showStatus("Filed under \"\(existing.name)\"")
+        } else {
+            // No matching category — create one with CategoryEditorView defaults,
+            // then immediately assign so the user sees the result without extra steps.
+            let created = store.createCategory(
+                named: target,
+                colorHex: CategoryPalette.hexes[0],
+                iconKind: .symbol,
+                iconValue: "pin.fill"
+            )
+            if let catID = created?.id {
+                store.addClip(id: clipID, toCategory: catID)
+                showStatus("Created \"\(target)\" and filed")
+            } else {
+                showStatus("Could not create category \"\(target)\"")
+            }
+        }
+    }
+
+    private func showStatus(_ message: String) {
+        statusMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if statusMessage == message {
+                statusMessage = nil
+            }
         }
     }
 

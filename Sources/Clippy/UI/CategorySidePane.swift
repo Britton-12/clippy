@@ -10,8 +10,8 @@ struct CategorySidePane: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var editingCategory: Category?
     @State private var isCreating = false
-    /// Category currently being dragged, so a drop target can compute the move.
-    @State private var draggingCategoryID: Int64?
+    /// Category row the cursor is hovering over during a category reorder drag.
+    @State private var draggingOverCategoryID: Int64?
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -25,7 +25,22 @@ struct CategorySidePane: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(store.categories) { category in
+                        let categoryID = category.id ?? -1
                         categoryRow(category)
+                            // "cat" kind tag distinguishes category tokens from
+                            // clip-reorder tokens ("reorder:clip:<id>"), which
+                            // share the same "reorder:" prefix. The tag lets the
+                            // sidebar clip-filing drop branch by TYPE alone,
+                            // eliminating the id-vs-category value check that
+                            // silently failed when clip.id == category.id.
+                            .reorderDraggable(id: categoryID, kind: "cat")
+                            .reorderDropDestination(
+                                id: categoryID,
+                                kind: "cat",
+                                draggingOver: $draggingOverCategoryID
+                            ) { draggedID, targetID in
+                                store.moveCategory(id: draggedID, beforeCategoryID: targetID)
+                            }
                     }
                     if settings.onePasswordEnabled {
                         onePasswordRow
@@ -101,24 +116,41 @@ struct CategorySidePane: View {
                 store.updateCategory(updated)
             }
         }
-        // Drag a category onto another to reorder; drag a clip card onto a
-        // category to file it there. The payload prefix disambiguates the two.
-        .draggable("cat:\(categoryID)") {
-            categoryIcon(category)
-                .foregroundStyle(tint)
-                .padding(6)
-                .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
-        }
+        // Accept clip drops for filing. Category-to-category reorder is handled
+        // by .reorderDraggable/.reorderDropDestination at the ForEach level.
+        //
+        // Payload shapes accepted here — routing is by TAG only, never by
+        // comparing the integer value to the category list:
+        //
+        //   "clip:<n>"            clip from the History pane
+        //                         (CategoryReorderModifier, no active category)
+        //
+        //   "reorder:clip:<n>"    clip from a category pane
+        //                         (CategoryReorderModifier with kind "clip")
+        //
+        // Category-reorder tokens ("reorder:cat:<n>") are NOT listed here and
+        // fall through to return false, allowing the outer reorderDropDestination
+        // (kind "cat") to handle them. This works even when clip.id == category.id
+        // because routing is determined by the kind tag, not the integer value.
         .dropDestination(for: String.self) { items, _ in
             guard let payload = items.first else { return false }
-            if payload.hasPrefix("cat:") {
-                guard let draggedID = Int64(payload.dropFirst(4)), draggedID != categoryID else { return false }
-                store.moveCategory(id: draggedID, beforeCategoryID: categoryID)
+
+            if payload.hasPrefix("clip:") {
+                // History-pane clip filing: "clip:<n>"
+                guard let clipID = Int64(payload.dropFirst(5)) else { return false }
+                store.addClip(id: clipID, toCategory: categoryID)
                 return true
             }
-            guard let clipID = Int64(payload) else { return false }
-            store.addClip(id: clipID, toCategory: categoryID)
-            return true
+
+            if payload.hasPrefix("reorder:clip:") {
+                // Category-pane clip filing: "reorder:clip:<n>"
+                guard let clipID = Int64(payload.dropFirst(13)) else { return false }
+                store.addClip(id: clipID, toCategory: categoryID)
+                return true
+            }
+
+            // "reorder:cat:<n>" and any other payload: not our responsibility.
+            return false
         }
         .accessibilityLabel("\(category.name), \(store.clipCount(inCategory: categoryID)) clips")
     }

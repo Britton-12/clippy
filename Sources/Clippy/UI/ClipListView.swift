@@ -393,12 +393,10 @@ struct ClipListView: View {
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
-        // Primary drag: carries a bare clip ID so CategorySidePane can file it
-        // into a category. This drag-out-to-apps behavior is always active.
-        .draggable(String(clipID))
-        // Within-category reorder: only active when showing a category pane.
-        // Uses the "reorder:" prefix so it never collides with the clip-to-category
-        // drop on CategorySidePane (which expects a bare integer or "cat:" token).
+        // Drag payload is managed entirely by CategoryReorderModifier so that
+        // only one .draggable is ever applied to this view. Two stacked
+        // .draggable modifiers on the same view cause SwiftUI to use only the
+        // inner one, silently dropping the outer reorder token.
         .modifier(CategoryReorderModifier(
             clipID: clipID,
             categoryID: categoryID,
@@ -651,30 +649,43 @@ struct ClipListView: View {
 
 // MARK: - Within-category reorder modifier
 
-/// Applied to every clip card in the list. When the current selection is a
-/// category pane, this adds both a "reorder:" draggable token and a drop
-/// destination that calls moveClip. When in History it is a no-op, leaving
-/// the existing clip-to-category drag behavior completely untouched.
+/// Applied to every clip card in the list. Owns the single .draggable for
+/// each row so there is never more than one drag payload per view (SwiftUI
+/// only honours the innermost payload when multiple .draggable modifiers are
+/// stacked, silently discarding the rest).
+///
+/// - History pane (categoryID == nil): emits "clip:<id>" so CategorySidePane's
+///   drop can file the clip by matching the TYPE TAG, never by comparing the
+///   integer to known category IDs.
+/// - Category pane (categoryID set): emits "reorder:clip:<id>" (kind "clip") so
+///   CategorySidePane's drop can distinguish this from category-reorder tokens
+///   ("reorder:cat:<id>") purely by tag, with no value-based id check.
+///   Within-list reorder also uses kind "clip" and only accepts "reorder:clip:<id>".
 private struct CategoryReorderModifier: ViewModifier {
     let clipID: Int64
     let categoryID: Int64?
     @Binding var draggingOverClipID: Int64?
     let store: ClipStore
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     func body(content: Content) -> some View {
         guard let categoryID else {
-            // History pane: no reorder, no visual change.
-            return AnyView(content)
+            // History pane: "clip:<id>" payload so CategorySidePane's drop handler
+            // can branch on the TYPE TAG rather than checking whether the integer
+            // matches a known category. A clip whose Int64 id happens to equal an
+            // existing category id would otherwise be silently rejected.
+            return AnyView(content.draggable("clip:\(clipID)"))
         }
         return AnyView(
             content
-                // The "reorder:" prefix distinguishes this from the bare clip-ID
-                // drag that CategorySidePane uses to file clips into categories.
-                .reorderDraggable(id: clipID)
+                // "clip" kind tag so CategorySidePane's drop can distinguish
+                // "reorder:clip:<id>" from "reorder:cat:<id>" by TAG alone.
+                // Previously both used plain "reorder:<id>", requiring a
+                // store.categories.contains() value check that silently misfired
+                // when clip.id happened to equal a category id.
+                .reorderDraggable(id: clipID, kind: "clip")
                 .reorderDropDestination(
                     id: clipID,
+                    kind: "clip",
                     draggingOver: $draggingOverClipID
                 ) { draggedID, targetID in
                     store.moveClip(draggedID, inCategory: categoryID, before: targetID)
