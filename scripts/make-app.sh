@@ -44,6 +44,30 @@ cp .build/release/Clippy "$APP/Contents/MacOS/Clippy"
 # The .icns is generated once via: swift assets/generate-icon.swift
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# -----------------------------------------------------------------------
+# Bundle the MCP server into Resources so an installed app has a server to
+# run. It is a single esbuild .mjs that uses Node's built-in node:sqlite
+# (Node >= 22.13), so there is no node_modules to ship. Without this copy
+# only dev builds work (they fall back to the source tree); an installed
+# app would have nothing to launch. Must run before codesign so the
+# signature covers it.
+#   REQUIRE_MCP=1 makes a missing/unbuildable server a hard error (CI).
+MCP_DIR="integrations/clippy-mcp"
+MCP_BUILT="$MCP_DIR/build/index.mjs"
+if command -v npm >/dev/null 2>&1; then
+    ( cd "$MCP_DIR" && npm ci --no-audit --no-fund && npm run build )
+fi
+if [[ -f "$MCP_BUILT" ]]; then
+    mkdir -p "$APP/Contents/Resources/clippy-mcp"
+    cp "$MCP_BUILT" "$APP/Contents/Resources/clippy-mcp/index.mjs"
+    echo "Bundled MCP server: $APP/Contents/Resources/clippy-mcp/index.mjs"
+elif [[ "${REQUIRE_MCP:-0}" == "1" ]]; then
+    echo "error: $MCP_BUILT not found; install Node/npm and build the MCP server" >&2
+    exit 1
+else
+    echo "warning: $MCP_BUILT not found; building app without the bundled MCP server" >&2
+fi
+
 # Sparkle ships as a binary xcframework inside the SwiftPM artifacts dir; the
 # app bundle needs its own embedded copy plus an rpath that points at it.
 SPARKLE_FRAMEWORK="$(find .build/artifacts -type d -name 'Sparkle.framework' -path '*macos*' | head -n 1)"

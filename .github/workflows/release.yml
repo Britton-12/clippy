@@ -77,6 +77,13 @@ jobs:
                       echo "Created and pushed tag $TAG"
                   fi
 
+            # Node 22 is required to build the bundled MCP server (esbuild) and
+            # to run its node:sqlite smoke test; node:sqlite is unflagged at >=22.13.
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
             # ---------------------------------------------------------------
             # Preflight: fail early with a clear message rather than silently
             # producing a broken release later.
@@ -112,8 +119,17 @@ jobs:
             - name: Run tests
               run: swift test
 
+            # Verify the bundled MCP server builds, typechecks, and passes its
+            # node:sqlite round-trip smoke test before it gets packaged.
+            - name: Build and smoke-test MCP server
+              run: |
+                  cd integrations/clippy-mcp
+                  npm ci --no-audit --no-fund
+                  npm run typecheck
+                  npm test
+
             - name: Build app bundle
-              run: REQUIRE_SPARKLE=1 scripts/make-app.sh "$VERSION"
+              run: REQUIRE_SPARKLE=1 REQUIRE_MCP=1 scripts/make-app.sh "$VERSION"
 
             # ---------------------------------------------------------------
             # Developer ID signing with hardened runtime.
@@ -172,7 +188,7 @@ jobs:
                   # Sign the already-assembled bundle. make-app.sh skips rebuilding
                   # swift sources when invoked a second time (the binary exists);
                   # CODESIGN_IDENTITY triggers the full nested Developer ID signing path.
-                  CODESIGN_IDENTITY="$IDENTITY" REQUIRE_SPARKLE=1 scripts/make-app.sh "$VERSION"
+                  CODESIGN_IDENTITY="$IDENTITY" REQUIRE_SPARKLE=1 REQUIRE_MCP=1 scripts/make-app.sh "$VERSION"
 
             # Always clean up the throwaway keychain, even if a prior step failed.
             - name: Remove throwaway keychain

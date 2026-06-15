@@ -1,0 +1,31 @@
+{
+  "name": "clippy-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Clippy macOS clipboard manager. Reads and writes Clippy's GRDB/SQLite database directly via Node's built-in node:sqlite.",
+  "type": "module",
+  "bin": {
+    "clippy-mcp": "build/index.mjs"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=build/index.mjs --external:node:*",
+    "typecheck": "tsc --noEmit",
+    "start": "node build/index.mjs",
+    "test": "npm run build && node test/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.0"
+  }
+}

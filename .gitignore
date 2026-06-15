@@ -37,10 +37,13 @@
 !assets/**
 !img/
 !img/**
+!integrations/
+!integrations/**
 
 # Re-exclude generated artifacts (must come after allowlist)
 .build/
 build/
+**/node_modules/
 **/.DS_Store
 assets/AppIcon.iconset/
 

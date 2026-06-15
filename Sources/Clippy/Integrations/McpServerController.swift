@@ -82,31 +82,26 @@ final class McpServerController: ObservableObject {
 
     // MARK: - Script path resolution
 
-    /// Resolve the built server script. Handles both .app bundle layout and
-    /// the dev/SwiftPM layout where there is no enclosing .app.
+    /// Resolve the bundled server script. Prefers the copy shipped inside the
+    /// .app (Contents/Resources/clippy-mcp/index.mjs, written by make-app.sh),
+    /// then falls back to the dev/SwiftPM source tree so `swift run` works
+    /// without a packaged app. make-app.sh bundles a single esbuild .mjs that
+    /// uses Node's built-in node:sqlite, so there is no node_modules to ship.
     static func findServerScript() -> String? {
-        // .app bundle: <App.app>/Contents/MacOS/../../../integrations/clippy-mcp/build/index.js
-        // In practice the executable sits at MacOS/, so deletingLastPathComponent x3 gets
-        // us to the .app bundle root, and one more gets to the folder containing it.
-        let execPath = Bundle.main.executablePath ?? ""
-        let execURL = URL(fileURLWithPath: execPath)
-
-        // Try next to the .app bundle (sibling of the .app)
-        let bundleAdjacentScript = execURL
-            .deletingLastPathComponent() // MacOS/
-            .deletingLastPathComponent() // Contents/
-            .deletingLastPathComponent() // App.app/
-            .deletingLastPathComponent() // parent of .app
-            .appendingPathComponent("integrations/clippy-mcp/build/index.js")
-        if FileManager.default.fileExists(atPath: bundleAdjacentScript.path) {
-            return bundleAdjacentScript.path
+        // Production: bundled inside the app's Resources directory.
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundled = resourceURL.appendingPathComponent("clippy-mcp/index.mjs")
+            if FileManager.default.fileExists(atPath: bundled.path) {
+                return bundled.path
+            }
         }
 
-        // Dev/SwiftPM: executable is at .build/debug/Clippy or similar;
-        // walk up looking for integrations/clippy-mcp/build/index.js
-        var candidate = execURL.deletingLastPathComponent()
-        for _ in 0..<6 {
-            let script = candidate.appendingPathComponent("integrations/clippy-mcp/build/index.js")
+        // Dev/SwiftPM: the executable sits at .build/debug/Clippy or similar.
+        // Walk up looking for the freshly built bundle in the source tree.
+        let execPath = Bundle.main.executablePath ?? ""
+        var candidate = URL(fileURLWithPath: execPath).deletingLastPathComponent()
+        for _ in 0..<8 {
+            let script = candidate.appendingPathComponent("integrations/clippy-mcp/build/index.mjs")
             if FileManager.default.fileExists(atPath: script.path) {
                 return script.path
             }
@@ -164,7 +159,8 @@ final class McpServerController: ObservableObject {
         }
 
         guard let scriptPath = McpServerController.findServerScript() else {
-            let msg = "MCP server not built. Run npm run build in integrations/clippy-mcp."
+            let msg = "MCP server script not found in the app bundle. "
+                + "(Dev builds: run npm run build in integrations/clippy-mcp.)"
             ClippyLog.error("MCP start failed: \(msg)", category: ClippyLog.mcp)
             DispatchQueue.main.async { [weak self] in
                 self?.status = .failed(msg)
@@ -187,7 +183,9 @@ final class McpServerController: ObservableObject {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: nodePath)
-        proc.arguments = [scriptPath]
+        // node:sqlite is unflagged since Node 22.13 but still emits an
+        // ExperimentalWarning; silence it so a clean stderr means a clean start.
+        proc.arguments = ["--disable-warning=ExperimentalWarning", scriptPath]
 
         var env = ProcessInfo.processInfo.environment
         env["CLIPPY_MCP_PORT"] = "\(port)"
