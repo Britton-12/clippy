@@ -531,7 +531,14 @@ struct ClipListView: View {
                 let categoryID = category.id ?? -1
                 let isMember = store.categoryIDs(for: clip).contains(categoryID)
                 Button {
-                    store.setClip(clip, inCategory: categoryID, !isMember)
+                    if isMember {
+                        // Tapping a member category removes the clip from it.
+                        store.setClip(clip, inCategory: categoryID, false)
+                    } else if let clipID = clip.id {
+                        // Filing routes through fileClip so single-membership mode
+                        // clears the other categories; multiple-mode stays additive.
+                        store.fileClip(id: clipID, intoCategory: categoryID)
+                    }
                 } label: {
                     if isMember {
                         Label(category.name, systemImage: "checkmark")
