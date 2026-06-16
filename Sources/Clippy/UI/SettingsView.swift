@@ -75,7 +75,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(section.tint.gradient)
+                        .fill((isSelected ? tokens.accent : tokens.textSecondary).gradient)
                         .frame(width: 22, height: 22)
                     Image(systemName: section.icon)
                         .font(.system(size: 11, weight: .semibold))
