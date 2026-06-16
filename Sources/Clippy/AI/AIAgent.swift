@@ -96,6 +96,9 @@ enum AIAgent {
                             // when it requires confirmation (run_script, execute_code).
                             result = try await tool.execute(args: call.arguments)
                         } catch {
+                            // Log so operators can diagnose silently-failing tools;
+                            // the model still receives the error string so it can report back.
+                            ClippyLog.error("Tool \"\(call.toolName)\" failed: \(error)", category: ClippyLog.ai)
                             result = "Tool error: \(error.localizedDescription)"
                         }
                     } else {
@@ -155,7 +158,12 @@ enum AIAgent {
                             let result: String
                             if let tool = tools.first(where: { $0.name == call.toolName }) {
                                 do { result = try await tool.execute(args: call.arguments) }
-                                catch { result = "Tool error: \(error.localizedDescription)" }
+                                catch {
+                                    // Log so operators can diagnose silently-failing tools;
+                                    // the model still receives the error string so it can report back.
+                                    ClippyLog.error("Tool \"\(call.toolName)\" failed: \(error)", category: ClippyLog.ai)
+                                    result = "Tool error: \(error.localizedDescription)"
+                                }
                             } else {
                                 result = "Error: unknown tool \"\(call.toolName)\"."
                             }
@@ -620,7 +628,10 @@ struct AzureFoundryAgentProvider: AIAgentProvider {
         let data = try await AIHTTP.post(
             url: url, headers: ["api-key": config.apiKey],
             body: [
-                "messages": AIHTTP.messagePayload(messages),
+                // Use the same wire transform as the agentic path so that
+                // tool-result sentinel messages (injected by AIAgent.streamWithTools
+                // at the round-cap summary turn) are correctly shaped for Azure.
+                "messages": OpenAIAgentProvider.wireMessages(messages),
                 "temperature": options.temperature,
                 "max_tokens": options.maxTokens,
             ]
@@ -676,22 +687,73 @@ enum AIAgentProviderFactory {
 // MARK: - Streaming accumulators
 //
 // Pure, stateful parsers that turn raw stream lines into text deltas + tool
-// calls. They have no networking and no wiring yet; later tasks feed them.
+// calls. They have no networking; feed raw lines and read results at the end.
+//
+// Architecture:
+//   StreamParser          - top-level protocol (consume + finishToolCalls)
+//   SSEStreamParser       - refines StreamParser; shared SSE framing default
+//                           for consume(line:); conformers supply decodeSSEPayload
+//   OpenAIStreamAccumulator  : SSEStreamParser  (OpenAI/Azure wire format)
+//   AnthropicStreamAccumulator : SSEStreamParser (Anthropic event format)
+//   OllamaStreamAccumulator  : StreamParser     (plain JSONL, not SSE)
+//
+// OpenAI and Anthropic share the SSE line-framing loop (data: prefix, DONE
+// sentinel, JSON root extraction) via the SSEStreamParser extension.
+// Their payload decode, storage shapes, and finishToolCalls() all differ and
+// stay per-conformer. Ollama is plain JSONL so it opts out of SSEStreamParser
+// entirely and provides its own consume(line:).
 
-/// Accumulates OpenAI/Azure chat-completions SSE deltas into events.
-/// Pure: feed each raw SSE line; text is returned immediately, tool calls are
-/// assembled from fragments and read out at the end via `finishToolCalls()`.
-struct OpenAIStreamAccumulator {
-    private var toolFragments: [Int: (id: String, name: String, args: String)] = [:]
-    private var sawToolCalls = false
+// MARK: - StreamParser protocol
 
+/// A streaming accumulator: feed raw lines one at a time; get back any text
+/// delta immediately; read assembled tool calls at end-of-stream.
+protocol StreamParser {
+    /// Process one raw line. Returns the text delta to emit, or nil.
+    mutating func consume(line: String) -> String?
+    /// Called once after the last line. Returns any accumulated tool calls.
+    func finishToolCalls() -> [AIToolCall]
+}
+
+// MARK: - SSEStreamParser (shared SSE line framing)
+
+/// Refines StreamParser for providers that use SSE (`data: <json>` lines).
+/// The default consume(line:) handles the framing: checks the `data:` prefix,
+/// strips it, skips the `[DONE]` sentinel, parses the JSON root, and calls
+/// decodeSSEPayload(root:) so each conformer only supplies the decode step.
+protocol SSEStreamParser: StreamParser {
+    /// Decode one already-parsed SSE JSON payload. Returns any text delta.
+    /// Mutating because conformers accumulate tool fragments here.
+    mutating func decodeSSEPayload(root: [String: Any]) -> String?
+}
+
+extension SSEStreamParser {
+    /// Shared SSE framing: strips `data:` prefix, skips `[DONE]`, parses JSON,
+    /// delegates the payload decode to the conformer.
     mutating func consume(line: String) -> String? {
         guard line.hasPrefix("data:") else { return nil }
         let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
         if payload == "[DONE]" { return nil }
         guard let data = payload.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = root["choices"] as? [[String: Any]],
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return decodeSSEPayload(root: root)
+    }
+}
+
+// MARK: - OpenAI / Azure accumulator
+
+/// Accumulates OpenAI/Azure chat-completions SSE deltas into events.
+/// Pure: feed each raw SSE line; text is returned immediately, tool calls are
+/// assembled from fragments and read out at the end via `finishToolCalls()`.
+struct OpenAIStreamAccumulator: SSEStreamParser {
+    private var toolFragments: [Int: (id: String, name: String, args: String)] = [:]
+    private var sawToolCalls = false
+
+    // SSEStreamParser: only the OpenAI-specific payload decode lives here.
+    // Wire shape: choices[0].delta.tool_calls[*] with function.arguments
+    // accumulated as a JSON string keyed by index.
+    mutating func decodeSSEPayload(root: [String: Any]) -> String? {
+        guard let choices = root["choices"] as? [[String: Any]],
               let delta = choices.first?["delta"] as? [String: Any] else { return nil }
         if let calls = delta["tool_calls"] as? [[String: Any]] {
             sawToolCalls = true
@@ -722,17 +784,21 @@ struct OpenAIStreamAccumulator {
     }
 }
 
+// MARK: - Anthropic accumulator
+
 /// Accumulates Anthropic Messages SSE events into text deltas + tool calls.
-struct AnthropicStreamAccumulator {
+/// Uses a different event schema (content_block_start/delta, partial_json)
+/// from the OpenAI wire format, so it supplies its own decodeSSEPayload while
+/// still sharing the SSE line-framing loop via SSEStreamParser.
+struct AnthropicStreamAccumulator: SSEStreamParser {
     private var blocks: [Int: (type: String, id: String, name: String, json: String)] = [:]
     private var stopReason = ""
 
-    mutating func consume(line: String) -> String? {
-        guard line.hasPrefix("data:") else { return nil }
-        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-        guard let data = payload.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = root["type"] as? String else { return nil }
+    // SSEStreamParser: Anthropic-specific event dispatch.
+    // Wire shape: content_block_start carries id+name; content_block_delta
+    // carries text_delta for text or input_json_delta (partial_json) for tools.
+    mutating func decodeSSEPayload(root: [String: Any]) -> String? {
+        guard let type = root["type"] as? String else { return nil }
         switch type {
         case "content_block_start":
             let idx = root["index"] as? Int ?? 0
@@ -773,8 +839,12 @@ struct AnthropicStreamAccumulator {
     }
 }
 
+// MARK: - Ollama accumulator
+
 /// Accumulates Ollama /api/chat JSONL lines into text deltas + tool calls.
-struct OllamaStreamAccumulator {
+/// Ollama uses plain JSONL (one JSON object per line, no `data:` prefix), so
+/// it conforms directly to StreamParser and skips the SSE framing path.
+struct OllamaStreamAccumulator: StreamParser {
     private var pendingToolCalls: [AIToolCall] = []
 
     mutating func consume(line: String) -> String? {
