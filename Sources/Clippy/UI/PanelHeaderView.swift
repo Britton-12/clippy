@@ -1,15 +1,19 @@
 import SwiftUI
 import AppKit
 
-/// An AppKit view that lets the user drag the borderless panel by this region
-/// only. With `isMovableByWindowBackground` off on the panel, AppKit moves the
-/// window only from views that return true here, so this is the sole drag area.
-private final class DragHandleNSView: NSView {
+/// An AppKit view that hands the panel drag to the Window Server. Overriding
+/// mouseDown to call performDrag is the documented way to drag a borderless /
+/// non-activating panel from a custom region. Attached behind the header
+/// content so any area not covered by a hit-testable control starts the drag.
+private final class DragNSView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
     override var mouseDownCanMoveWindow: Bool { true }
 }
 
-struct WindowDragHandle: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { DragHandleNSView() }
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragNSView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
@@ -26,27 +30,38 @@ struct PanelHeaderView: View {
     private let settings = AppSettings.shared
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(nsImage: StatusBarIcon.image())
-                .renderingMode(.template)
-                .resizable()
-                .frame(width: 16, height: 16)
-                .foregroundStyle(tokens.accent)
-            Text("Clippy")
-                .font(PanelTypography.title(settings))
-                .foregroundStyle(tokens.textPrimary)
-            Spacer(minLength: 0)
-            headerButton(systemName: isPinned ? "pin.fill" : "pin",
-                         help: isPinned ? "Unpin panel" : "Pin panel",
-                         action: onTogglePin)
-            headerButton(systemName: "gearshape",
-                         help: "Settings", action: onOpenSettings)
-            headerButton(systemName: "xmark",
-                         help: "Close", action: onClose)
+        ZStack {
+            // Sits behind the content; receives mouse-down on any area not covered
+            // by a hit-testable control, and hands the drag to the Window Server.
+            WindowDragArea()
+            HStack(spacing: 8) {
+                Image(nsImage: StatusBarIcon.image())
+                    .renderingMode(.template)
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(tokens.accent)
+                    // Hit-transparent so mouse-downs on the mark fall through to
+                    // WindowDragArea and start a window drag.
+                    .allowsHitTesting(false)
+                Text("Clippy")
+                    .font(PanelTypography.title(settings))
+                    .foregroundStyle(tokens.textPrimary)
+                    // Hit-transparent for the same reason as the mark above.
+                    .allowsHitTesting(false)
+                Spacer(minLength: 0)
+                headerButton(systemName: isPinned ? "pin.fill" : "pin",
+                             help: isPinned ? "Unpin panel" : "Pin panel",
+                             action: onTogglePin)
+                headerButton(systemName: "gearshape",
+                             help: "Settings", action: onOpenSettings)
+                headerButton(systemName: "xmark",
+                             help: "Close", action: onClose)
+            }
+            // Container stays hit-testable so the three buttons keep working.
+            .allowsHitTesting(true)
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
         .frame(height: 30)
-        .background(WindowDragHandle())
         .background(tokens.headerBar.opacity(settings.panelOpacity))
     }
 
