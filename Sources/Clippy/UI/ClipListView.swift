@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Content of the popup panel: search bar, a 75/25 split between the main
 /// content pane and the category side pane, and a shortcut footer. The main
@@ -494,25 +495,6 @@ struct ClipListView: View {
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
-        // Click semantics layered over the card's inner Button (whose plain
-        // single-click action selects). These high-priority gestures intercept
-        // the modified and double clicks before the Button's action fires:
-        //   Cmd-click   -> toggle this clip in the multi-selection
-        //   Shift-click -> extend the multi-selection range from the anchor
-        //   Double-click-> paste/activate (the old single-click behavior)
-        // Keyboard Return-to-paste is unchanged (see pasteSelected).
-        .highPriorityGesture(
-            TapGesture().modifiers(.command)
-                .onEnded { handleRowClick(clip, at: index, modifiers: .command) }
-        )
-        .highPriorityGesture(
-            TapGesture().modifiers(.shift)
-                .onEnded { handleRowClick(clip, at: index, modifiers: .shift) }
-        )
-        .highPriorityGesture(
-            TapGesture(count: 2)
-                .onEnded { onPrimary(clip) }
-        )
         // Drag payload is managed entirely by CategoryReorderModifier so that
         // only one .draggable is ever applied to this view. Two stacked
         // .draggable modifiers on the same view cause SwiftUI to use only the
@@ -523,6 +505,25 @@ struct ClipListView: View {
             draggingOverClipID: $draggingOverClipID,
             store: store
         ))
+        // Normal-precedence taps compose with the .draggable applied by the
+        // modifier above (a tap fires on click-without-move; a drag fires on
+        // press-and-move). highPriorityGesture would block the draggable, so it
+        // is deliberately avoided here.
+        //   Double-click -> paste/activate (configurable primary action)
+        //   Cmd-click     -> toggle this clip in the multi-selection
+        //   Shift-click   -> extend the multi-selection range from the anchor
+        //   Plain click   -> the card's primary action (select/paste/copy)
+        .onTapGesture(count: 2) { onPrimary(clip) }
+        .onTapGesture {
+            let mods = NSEvent.modifierFlags
+            if mods.contains(.command) {
+                handleRowClick(clip, at: index, modifiers: .command)
+            } else if mods.contains(.shift) {
+                handleRowClick(clip, at: index, modifiers: .shift)
+            } else {
+                handleRowClick(clip, at: index, modifiers: [])
+            }
+        }
         .contextMenu {
             if selectedClipIDs.count >= 2 {
                 // Batch variants act on the whole multi-selection.

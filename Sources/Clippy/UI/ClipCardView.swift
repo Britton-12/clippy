@@ -1,22 +1,5 @@
 import SwiftUI
 
-/// ButtonStyle that renders the card label and applies a press-scale effect.
-/// Owning press state here (via configuration.isPressed) is correct because
-/// Button arbitrates with .draggable and .contextMenu without needing a
-/// separate onLongPressGesture hack.
-private struct CardButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.10),
-                value: configuration.isPressed
-            )
-    }
-}
-
 /// One clipboard item rendered as a card: colored edge stripe (per-app or
 /// per-kind tint), source app icon, content-type badge, preview text or image
 /// thumbnail, and hover-revealed quick actions. Selection draws an accent ring.
@@ -110,11 +93,11 @@ struct ClipCardView: View {
     }
 
     var body: some View {
-        // Wrapping in Button lets SwiftUI own hit-testing and press-state, which
-        // composes correctly with .draggable and .contextMenu. CardButtonStyle
-        // applies the scale feedback so the onLongPressGesture hack is gone.
-        Button(action: onActivate) {
-            HStack(spacing: 0) {
+        // Presentational card (no Button). A Button would capture the press and
+        // its tap, blocking .draggable from ever starting. Clicks are routed at
+        // the construction site via .onTapGesture, which composes with the
+        // .draggable applied there. onActivate is no longer invoked here.
+        HStack(spacing: 0) {
                 // Color identity stripe; hidden in plain style (no chrome at all).
                 if settings.cardStyle != .plain {
                     Rectangle()
@@ -164,8 +147,8 @@ struct ClipCardView: View {
                 // affordance is discoverable.
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
-        }
-        .buttonStyle(CardButtonStyle())
+        // Whole card area hit-testable so taps land anywhere on the card.
+        .contentShape(Rectangle())
         .help(kind.label)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
