@@ -255,12 +255,19 @@ enum Theme {
 
 // MARK: - Hex bridging for Color / NSColor
 
+/// Parse #RGB, #RRGGBB, or #RRGGBBAA into a SwiftUI Color. Returns nil on
+/// any parse failure. Callers apply their own fallback so the two distinct
+/// defaults (theme magenta vs category systemGray) stay separate.
+func parseHexColor(_ hex: String) -> Color? {
+    guard let ns = NSColor(themeHex: hex) else { return nil }
+    return Color(nsColor: ns)
+}
+
 extension Color {
     /// Parse #RGB, #RRGGBB, or #RRGGBBAA. Falls back to the supplied color (or
     /// magenta, which is deliberately ugly so a bad token is obvious).
     init(themeHex hex: String, fallback: Color = Color(red: 1, green: 0, blue: 1)) {
-        guard let ns = NSColor(themeHex: hex) else { self = fallback; return }
-        self = Color(nsColor: ns)
+        self = parseHexColor(hex) ?? fallback
     }
 
     /// "#RRGGBB" for persistence from a SwiftUI ColorPicker selection.
@@ -269,7 +276,7 @@ extension Color {
     /// #RGB, #RRGGBB, or #RRGGBBAA; falls back to system gray. Used for category
     /// colors, which deliberately fall back to gray rather than the theme magenta.
     init(hexString: String) {
-        self = ClipKind.parseHexColor(hexString) ?? Color(nsColor: .systemGray)
+        self = parseHexColor(hexString) ?? Color(nsColor: .systemGray)
     }
 }
 

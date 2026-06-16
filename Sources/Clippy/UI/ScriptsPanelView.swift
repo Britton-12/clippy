@@ -276,9 +276,7 @@ private struct ScriptRowView: View {
         HStack(spacing: 8) {
             if hasStdout {
                 Button("Copy output") {
-                    let pb = NSPasteboard.general
-                    pb.clearContents()
-                    pb.setString(result.stdout, forType: .string)
+                    copyToPasteboard(result.stdout)
                 }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
@@ -315,12 +313,20 @@ private struct ScriptRowView: View {
             let result = await ScriptRunner.run(script, input: input)
             // Honor outputToClipboard before surfacing the result in the UI.
             if script.outputToClipboard, result.succeeded, !result.stdout.isEmpty {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(result.stdout, forType: .string)
+                copyToPasteboard(result.stdout)
             }
             runState = .done(result)
         }
+    }
+
+    // MARK: Pasteboard helper
+
+    /// Replaces the pasteboard contents with `string`. Called from both the
+    /// "Copy output" button and the outputToClipboard auto-copy path.
+    private func copyToPasteboard(_ string: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: .string)
     }
 }
 

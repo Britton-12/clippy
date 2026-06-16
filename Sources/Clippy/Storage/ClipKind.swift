@@ -76,11 +76,11 @@ enum ClipKind: Equatable {
 
     // MARK: - Color parsing
 
-    /// #RGB, #RRGGBB, or #RRGGBBAA. Delegates to the single `NSColor(themeHex:)`
-    /// parser; keeps the stricter `#`-required contract used by clip detection.
+    /// #RGB, #RRGGBB, or #RRGGBBAA. Delegates to the shared `parseHexColor`
+    /// free function; keeps the stricter `#`-required contract for clip detection.
     static func parseHexColor(_ text: String) -> Color? {
-        guard text.hasPrefix("#"), let ns = NSColor(themeHex: text) else { return nil }
-        return Color(nsColor: ns)
+        guard text.hasPrefix("#") else { return nil }
+        return Clippy.parseHexColor(text)
     }
 }
 
