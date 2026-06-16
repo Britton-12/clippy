@@ -323,7 +323,14 @@ struct AIAssistantPanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(vm.messages) { message in
-                        MessageBubble(message: message, tokens: tokens, settings: settings)
+                        MessageBubble(
+                            message: message,
+                            tokens: tokens,
+                            settings: settings,
+                            isLive: vm.state == .streaming
+                                && message.id == vm.messages.last?.id
+                                && message.role == .assistant
+                        )
                             .id(message.id)
                     }
                     if showThinkingIndicator {
@@ -429,6 +436,7 @@ private struct MessageBubble: View {
     let message: AssistantMessage
     let tokens: ThemeTokens
     let settings: AppSettings
+    let isLive: Bool
 
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
@@ -442,8 +450,18 @@ private struct MessageBubble: View {
                             .font(PanelTypography.body(settings))
                             .foregroundStyle(Color(nsColor: .systemOrange))
                     } else if message.role == .assistant {
-                        Markdown(message.text.isEmpty ? " " : message.text)
-                            .markdownTheme(.clippy(tokens: tokens, settings: settings))
+                        // While a turn is streaming, render plain Text: re-parsing the
+                        // whole markdown string on every flush saturates the main thread.
+                        // Swap to Markdown once the turn is done (isLive == false).
+                        if isLive {
+                            Text(message.text.isEmpty ? " " : message.text)
+                                .font(PanelTypography.body(settings))
+                                .foregroundStyle(tokens.textPrimary)
+                                .textSelection(.enabled)
+                        } else {
+                            Markdown(message.text.isEmpty ? " " : message.text)
+                                .markdownTheme(.clippy(tokens: tokens, settings: settings))
+                        }
                     } else {
                         Text(message.text.isEmpty ? " " : message.text)
                             .font(PanelTypography.body(settings))

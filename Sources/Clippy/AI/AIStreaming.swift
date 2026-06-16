@@ -26,7 +26,7 @@ enum AIStreamingHTTP {
         idleTimeout: TimeInterval = 30
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            let work = Task {
+            let work = Task.detached {
                 guard let url = URL(string: urlString) else {
                     continuation.finish(throwing: AIError.badURL(urlString)); return
                 }
@@ -42,7 +42,7 @@ enum AIStreamingHTTP {
                 }
 
                 let lastActivity = ActivityClock()
-                let watchdog = Task {
+                let watchdog = Task.detached {
                     while !Task.isCancelled {
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
                         if lastActivity.secondsSince() > idleTimeout {

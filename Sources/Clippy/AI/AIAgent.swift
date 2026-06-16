@@ -130,7 +130,7 @@ enum AIAgent {
         options: AICompletionOptions = AICompletionOptions()
     ) -> AsyncThrowingStream<AIAgentEvent, Error> {
         AsyncThrowingStream { continuation in
-            let task = Task {
+            let task = Task.detached {
                 var messages = initialMessages
                 let maxRounds = 8
                 var round = 0
@@ -292,7 +292,7 @@ struct OpenAIAgentProvider: AIAgentProvider {
                             accumulator: OpenAIStreamAccumulator)
         -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            let task = Task {
+            let task = Task.detached {
                 var acc = accumulator
                 do {
                     for try await line in lines {
@@ -419,7 +419,7 @@ struct AnthropicAgentProvider: AIAgentProvider {
             headers: ["x-api-key": config.apiKey, "anthropic-version": "2023-06-01"],
             body: body)
         return AsyncThrowingStream { continuation in
-            let task = Task {
+            let task = Task.detached {
                 var acc = AnthropicStreamAccumulator()
                 do {
                     for try await line in lines {
@@ -549,7 +549,7 @@ struct OllamaAgentProvider: AIAgentProvider {
         ]
         let lines = AIStreamingHTTP.postLines(url: "\(config.baseURL)/api/chat", headers: [:], body: body)
         return AsyncThrowingStream { continuation in
-            let task = Task {
+            let task = Task.detached {
                 var acc = OllamaStreamAccumulator()
                 do {
                     for try await line in lines {
