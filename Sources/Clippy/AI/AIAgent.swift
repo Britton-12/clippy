@@ -119,6 +119,64 @@ enum AIAgent {
         return try await provider.complete(messages, options: options)
     }
 
+    /// Streaming variant of the agent loop. Yields text deltas live as the model
+    /// produces them, brackets each tool execution with `.toolStarted`/`.toolFinished`,
+    /// and finishes when the model returns plain text (no tool calls) or `maxRounds`
+    /// is exhausted (in which case it appends a final non-streaming summary turn).
+    static func streamWithTools(
+        messages initialMessages: [AIMessage],
+        provider: AIAgentProvider,
+        tools: [AITool],
+        options: AICompletionOptions = AICompletionOptions()
+    ) -> AsyncThrowingStream<AIAgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var messages = initialMessages
+                let maxRounds = 8
+                var round = 0
+                do {
+                    while round < maxRounds {
+                        round += 1
+                        var collectedCalls: [AIToolCall] = []
+                        for try await event in provider.streamWithTools(messages, tools: tools, options: options) {
+                            switch event {
+                            case .textDelta(let t): continuation.yield(.textDelta(t))
+                            case .toolCalls(let calls): collectedCalls = calls
+                            case .done: break
+                            }
+                        }
+                        if collectedCalls.isEmpty {
+                            continuation.finish(); return
+                        }
+                        messages.append(AIMessage(role: .assistant,
+                                                  content: encodeToolCallsForHistory(collectedCalls)))
+                        for call in collectedCalls {
+                            continuation.yield(.toolStarted(call.toolName))
+                            let result: String
+                            if let tool = tools.first(where: { $0.name == call.toolName }) {
+                                do { result = try await tool.execute(args: call.arguments) }
+                                catch { result = "Tool error: \(error.localizedDescription)" }
+                            } else {
+                                result = "Error: unknown tool \"\(call.toolName)\"."
+                            }
+                            messages.append(AIMessage(role: .user,
+                                content: AIToolResultSentinel.encode(id: call.id, toolName: call.toolName, result: result)))
+                            continuation.yield(.toolFinished(call.toolName))
+                        }
+                    }
+                    // Round cap: one final non-streaming summary turn.
+                    messages.append(AIMessage(role: .user, content: "Summarise what you accomplished for the user."))
+                    let summary = try await provider.complete(messages, options: options)
+                    continuation.yield(.textDelta(summary))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: - Internal helpers
 
     /// Encode tool calls as a JSON string stored in the assistant message content
