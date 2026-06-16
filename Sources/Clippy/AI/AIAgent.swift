@@ -19,6 +19,10 @@ protocol AIAgentProvider: AIProvider {
         tools: [AITool],
         options: AICompletionOptions
     ) async throws -> AIAgentTurn
+
+    /// Streaming variant: yields text deltas live, then any tool calls, then `.done`.
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error>
 }
 
 // MARK: - Turn result
@@ -207,6 +211,47 @@ struct OpenAIAgentProvider: AIAgentProvider {
         return try Self.parseTurn(data)
     }
 
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let body: [String: Any] = [
+            "model": config.model,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "temperature": options.temperature,
+            "max_tokens": options.maxTokens,
+            "stream": true,
+        ]
+        let lines = AIStreamingHTTP.postLines(
+            url: "\(config.baseURL)/v1/chat/completions",
+            headers: ["Authorization": "Bearer \(config.apiKey)"],
+            body: body)
+        return Self.eventStream(from: lines, accumulator: OpenAIStreamAccumulator())
+    }
+
+    /// Shared driver: feed lines through an OpenAI accumulator, emit text deltas
+    /// live, then emit tool calls (if any) and `.done` at end. Reused by Azure.
+    static func eventStream(from lines: AsyncThrowingStream<String, Error>,
+                            accumulator: OpenAIStreamAccumulator)
+        -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = accumulator
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: Wire helpers
 
     static func wireMessages(_ messages: [AIMessage]) -> [[String: Any]] {
@@ -297,6 +342,39 @@ struct AnthropicAgentProvider: AIAgentProvider {
             body: body
         )
         return try Self.parseTurn(data)
+    }
+
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
+        var body: [String: Any] = [
+            "model": config.model,
+            "max_tokens": options.maxTokens,
+            "temperature": options.temperature,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.anthropicToolSpec),
+            "stream": true,
+        ]
+        if !system.isEmpty { body["system"] = system }
+        let lines = AIStreamingHTTP.postLines(
+            url: "\(config.baseURL)/v1/messages",
+            headers: ["x-api-key": config.apiKey, "anthropic-version": "2023-06-01"],
+            body: body)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = AnthropicStreamAccumulator()
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     // MARK: Wire helpers
@@ -402,6 +480,33 @@ struct OllamaAgentProvider: AIAgentProvider {
         return try Self.parseTurn(data)
     }
 
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let body: [String: Any] = [
+            "model": config.model,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "stream": true,
+            "options": ["temperature": options.temperature],
+        ]
+        let lines = AIStreamingHTTP.postLines(url: "\(config.baseURL)/api/chat", headers: [:], body: body)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = OllamaStreamAccumulator()
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     static func wireMessages(_ messages: [AIMessage]) -> [[String: Any]] {
         messages.map { msg in
             if let (_, _, result) = AIToolResultSentinel.decode(msg.content) {
@@ -480,6 +585,20 @@ struct AzureFoundryAgentProvider: AIAgentProvider {
         let data = try await AIHTTP.post(url: url, headers: ["api-key": config.apiKey], body: body)
         // Azure returns the same shape as OpenAI.
         return try OpenAIAgentProvider.parseTurn(data)
+    }
+
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let url = "\(config.baseURL)/openai/deployments/\(config.model)/chat/completions?api-version=\(config.apiVersion)"
+        let body: [String: Any] = [
+            "messages": OpenAIAgentProvider.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "temperature": options.temperature,
+            "max_tokens": options.maxTokens,
+            "stream": true,
+        ]
+        let lines = AIStreamingHTTP.postLines(url: url, headers: ["api-key": config.apiKey], body: body)
+        return OpenAIAgentProvider.eventStream(from: lines, accumulator: OpenAIStreamAccumulator())
     }
 }
 
