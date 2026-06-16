@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-06-16 - Deduplication wave + reliability fixes (PATHFINDER U1-U6 + F-trace)
+
+### Fixed
+- AI agent (Azure path): tool-result messages are now correctly shaped for the
+  OpenAI-compatible API on the round-cap summary turn. Previously the non-agentic
+  complete() sent the raw "__tool_result__:" sentinel string as a user message,
+  which Azure would reject or misread. Regression test in WireMessagesTests.
+- AI agent: tool-execution failures are now logged (ClippyLog) at both the
+  streaming and non-streaming catch sites; the model-facing result is unchanged.
+- MCP server restart no longer spuriously reports the port as in use; stop() now
+  waits for the old process to exit (bounded 2s, off the main thread) before
+  rebinding. Startup stderr is now captured even when /health answers quickly.
+- MCP Node server no longer leaks HTTP sessions for dropped clients: an idle TTL
+  reaper reclaims abandoned sessions while never reclaiming a session whose SSE
+  stream is still open.
+- Subprocess: fixed a latent data race on the stderr drain buffer in launch();
+  the McpInstallService runCLI path no longer does sequential blocking pipe reads
+  (removes a potential deadlock on chatty processes).
+
+### Changed
+- Internal deduplication pass (independently verified; test suite grew 192 -> 249):
+  all process execution routes through one Subprocess runner (including ScriptRunner,
+  which kept its timedOut/duration semantics); a generic JSONFileStore backs the
+  Script and AI-action stores; a single pure reorderIDs drives category/clip drag
+  ordering; an @AppDefault property wrapper replaces ~55 hand-written UserDefaults
+  properties in AppSettings (keys and defaults unchanged); a StreamParser protocol
+  shares the SSE framing across AI stream accumulators; hex-color parsing and the
+  scripts pasteboard write are shared helpers. No user-facing behavior change.
+
 ## 2026-06-12 - Enterprise polish wave (branch feature/enterprise-polish)
 
 ### Fixed
