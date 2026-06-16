@@ -29,6 +29,39 @@ final class PasteService {
         }
     }
 
+    /// Pastes several clips one after another as discrete Cmd-V events, in order.
+    /// Each lands at the current cursor; Clippy cannot move the target's cursor
+    /// between events, so consecutive pastes concatenate where the caret is.
+    func pasteSequence(_ clips: [Clip], asPlainText: Bool) {
+        guard !clips.isEmpty else { return }
+        let step = 0.15
+        for (i, clip) in clips.enumerated() {
+            let delay = 0.12 + Double(i) * step
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                if !self.settings.movePastedItemToTop { self.monitor.ignoreNextChange() }
+                self.writeToPasteboard(clip, asPlainText: asPlainText)
+                Self.sendPasteKeystroke()
+            }
+        }
+    }
+
+    /// Joins the text of several clips with `separator` and pastes once.
+    /// Image clips are skipped (text-only join).
+    func pasteCombined(_ clips: [Clip], separator: String = "\n", asPlainText: Bool) {
+        let text = clips.filter { $0.contentKind == .text }
+            .map { $0.contentText }
+            .joined(separator: separator)
+        guard !text.isEmpty else { return }
+        if !settings.movePastedItemToTop { monitor.ignoreNextChange() }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            Self.sendPasteKeystroke()
+        }
+    }
+
     /// Writes `clip` to the pasteboard without sending Cmd+V. Used by the
     /// copy-only click mode and the keystroke engine (which types the text
     /// directly instead of pasting).
