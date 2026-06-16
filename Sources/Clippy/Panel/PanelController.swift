@@ -9,6 +9,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var panel: PastePanel?
 
     var onPaste: ((Clip, Bool) -> Void)?
+    /// Paste several clips. `combined == true` joins them into one paste;
+    /// false pastes them sequentially.
+    var onPasteMany: (([Clip], _ combined: Bool, _ asPlainText: Bool) -> Void)?
     var onPrimary: ((Clip) -> Void)?
     var onSendKeystrokes: ((Clip) -> Void)?
     var onEdit: ((Clip) -> Void)?
@@ -54,6 +57,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         let root = ClipListView(
             store: store,
             onPaste: { [weak self] clip, asPlainText in self?.onPaste?(clip, asPlainText) },
+            onPasteMany: { [weak self] clips, combined, asPlainText in
+                self?.onPasteMany?(clips, combined, asPlainText)
+            },
             onPrimary: { [weak self] clip in self?.onPrimary?(clip) },
             onSendKeystrokes: { [weak self] clip in self?.onSendKeystrokes?(clip) },
             onEdit: { [weak self] clip in self?.onEdit?(clip) },
@@ -155,7 +161,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // panelFloatLevel take effect the next time the panel opens.
         applyFloatLevel(to: panel)
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true

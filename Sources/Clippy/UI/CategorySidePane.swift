@@ -138,14 +138,14 @@ struct CategorySidePane: View {
             if payload.hasPrefix("clip:") {
                 // History-pane clip filing: "clip:<n>"
                 guard let clipID = Int64(payload.dropFirst(5)) else { return false }
-                store.addClip(id: clipID, toCategory: categoryID)
+                store.fileClip(id: clipID, intoCategory: categoryID)
                 return true
             }
 
             if payload.hasPrefix("reorder:clip:") {
                 // Category-pane clip filing: "reorder:clip:<n>"
                 guard let clipID = Int64(payload.dropFirst(13)) else { return false }
-                store.addClip(id: clipID, toCategory: categoryID)
+                store.fileClip(id: clipID, intoCategory: categoryID)
                 return true
             }
 

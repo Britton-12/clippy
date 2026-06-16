@@ -75,7 +75,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(section.tint.gradient)
+                        .fill((isSelected ? tokens.accent : tokens.textSecondary).gradient)
                         .frame(width: 22, height: 22)
                     Image(systemName: section.icon)
                         .font(.system(size: 11, weight: .semibold))
@@ -173,17 +173,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .integrations: return "puzzlepiece.extension.fill"
         }
     }
-
-    var tint: Color {
-        switch self {
-        case .general: return Color(nsColor: .systemGray)
-        case .appearance: return Color(nsColor: .systemPink)
-        case .capture: return Color(nsColor: .systemBlue)
-        case .ai: return Color(nsColor: .systemPurple)
-        case .scripts: return Color(nsColor: .systemGreen)
-        case .integrations: return Color(nsColor: .systemOrange)
-        }
-    }
 }
 
 extension Bundle {
@@ -274,6 +263,8 @@ private struct GeneralSettingsTab: View {
                 Text("Clips in categories never count against the cap and survive Clear Unpinned History.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Allow a clip in multiple categories", isOn: $settings.allowMultipleCategories)
+                    .help("Off by default: filing a clip into a category removes it from any other category, so each clip lives in exactly one. On: a clip can belong to several categories at once.")
             }
 
             Section("Behavior") {

@@ -155,6 +155,20 @@ final class ClipStore: ObservableObject {
         try? database.setClip(clipID, inCategory: categoryID, true)
     }
 
+    /// Files a clip into `categoryID`, honoring the single-vs-multiple setting.
+    /// When multiple categories are disallowed (default), the clip is first
+    /// removed from every other category so it lives in exactly one.
+    func fileClip(id clipID: Int64, intoCategory categoryID: Int64) {
+        if !AppSettings.shared.allowMultipleCategories {
+            // Mirror the removal path used by setClip(... false): clear the clip
+            // from each other category before adding it to the target.
+            for existing in (membership[clipID] ?? []) where existing != categoryID {
+                try? database.setClip(clipID, inCategory: existing, false)
+            }
+        }
+        addClip(id: clipID, toCategory: categoryID)
+    }
+
     @discardableResult
     func createCategory(named name: String, colorHex: String, iconKind: CategoryIconKind, iconValue: String) -> Category? {
         try? database.createCategory(named: name, colorHex: colorHex, iconKind: iconKind, iconValue: iconValue)

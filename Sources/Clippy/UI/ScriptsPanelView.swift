@@ -219,11 +219,11 @@ private struct ScriptRowView: View {
                 Image(systemName: result.timedOut
                     ? "exclamationmark.clock.fill"
                     : (result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill"))
-                    .foregroundStyle(result.succeeded ? Color(nsColor: .systemGreen) : Color(nsColor: .systemRed))
+                    .foregroundStyle(result.succeeded ? tokens.success : tokens.danger)
                     .font(.system(size: 12))
                 Text(statusLabel(result))
                     .font(PanelTypography.metadata(settings).weight(.medium))
-                    .foregroundStyle(result.succeeded ? Color(nsColor: .systemGreen) : Color(nsColor: .systemRed))
+                    .foregroundStyle(result.succeeded ? tokens.success : tokens.danger)
                 Spacer()
                 Text("\(result.durationMs) ms")
                     .font(PanelTypography.micro(settings))
@@ -258,7 +258,7 @@ private struct ScriptRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(PanelTypography.micro(settings).weight(.semibold))
-                .foregroundStyle(isError ? Color(nsColor: .systemRed).opacity(0.8) : tokens.textSecondary)
+                .foregroundStyle(isError ? tokens.danger.opacity(0.8) : tokens.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(String(text.trimmingCharacters(in: .newlines).prefix(2000)))
                     .font(.system(size: 11, design: .monospaced))

@@ -10,6 +10,7 @@ struct ClipListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let onPaste: (Clip, Bool) -> Void
+    let onPasteMany: ([Clip], Bool, Bool) -> Void
     let onPrimary: (Clip) -> Void
     let onSendKeystrokes: (Clip) -> Void
     let onEdit: (Clip) -> Void
@@ -18,6 +19,19 @@ struct ClipListView: View {
 
     @State private var selection: PanelSelection = .history
     @State private var selectedIndex = 0
+    /// Explicit multi-selection by clip ID. Empty means "no multi-selection";
+    /// in that case the keyboard-anchored `selectedIndex`/`selectedClip` is the
+    /// single active clip. Plain click clears this back to empty.
+    @State private var selectedClipIDs: Set<Int64> = []
+
+    /// The clips batch actions operate on: the explicit multi-selection if any,
+    /// otherwise the single keyboard-anchored clip.
+    private var actionableClips: [Clip] {
+        if selectedClipIDs.isEmpty {
+            return selectedClip.map { [$0] } ?? []
+        }
+        return visibleClips.filter { clip in clip.id.map { selectedClipIDs.contains($0) } ?? false }
+    }
     @State private var categoryCreationClip: Clip?
     /// The ID of the clip whose title is currently being edited inline.
     @State private var renamingClipID: Int64?
@@ -30,6 +44,9 @@ struct ClipListView: View {
     /// there is one confirmation entry point and deletion is never destructive
     /// without a prompt.
     @State private var clipPendingDeletion: Clip?
+    /// The clips awaiting batch-delete confirmation. Nil when no batch delete is
+    /// pending; routes every multi-selection delete through one confirmation gate.
+    @State private var batchDeletePending: [Clip]?
     /// The clip waiting for the user to confirm a large keystroke action. Nil
     /// when the clip is below the warn threshold or no action is pending.
     @State private var clipPendingKeystrokes: Clip?
@@ -75,6 +92,13 @@ struct ClipListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PanelHeaderView(
+                isPinned: settings.panelPinned,
+                onTogglePin: { settings.panelPinned.toggle() },
+                onOpenSettings: onOpenSettings,
+                onClose: onClose
+            )
+            Divider()
             searchBar
             Divider()
             GeometryReader { geo in
@@ -87,6 +111,7 @@ struct ClipListView: View {
                 }
             }
             Divider()
+            if selectedClipIDs.count >= 2 { batchActionBar; Divider() }
             footer
         }
         .background(ThemedPanelBackground(tokens: tokens, opacity: settings.panelOpacity))
@@ -96,8 +121,8 @@ struct ClipListView: View {
                 .strokeBorder(tokens.cardBorder, lineWidth: 1)
         )
         .tint(tokens.accent)
-        .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
-        .onChange(of: selection) { _, _ in selectedIndex = 0 }
+        .onChange(of: store.clips) { _, _ in selectedIndex = 0; selectedClipIDs = [] }
+        .onChange(of: selection) { _, _ in selectedIndex = 0; selectedClipIDs = [] }
         // AI action sheet, shown when a context-menu AI action produces a proposal.
         .sheet(isPresented: Binding(
             get: { aiRunner.isPresenting },
@@ -124,6 +149,21 @@ struct ClipListView: View {
         } message: { _ in
             Text("This permanently removes the clip from your history.")
         }
+        // Batch delete confirmation. Mirrors the single-clip gate above so the
+        // multi-selection delete path is just as non-destructive.
+        .alert(
+            "Delete \(batchDeletePending?.count ?? 0) clips?",
+            isPresented: Binding(
+                get: { batchDeletePending != nil },
+                set: { if !$0 { batchDeletePending = nil } }
+            ),
+            presenting: batchDeletePending
+        ) { clips in
+            Button("Delete", role: .destructive) { performBatchDelete(clips) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This permanently removes the selected clips from your history.")
+        }
         // Confirmation gate for large keystroke actions so an accidental click
         // does not type thousands of characters into the active app.
         .alert(
@@ -147,6 +187,55 @@ struct ClipListView: View {
     /// entry points call this instead of store.delete directly.
     private func requestDelete(_ clip: Clip) {
         clipPendingDeletion = clip
+    }
+
+    // MARK: - Batch actions
+
+    /// Stages the current multi-selection for deletion behind the batch alert.
+    private func requestBatchDelete() {
+        let clips = actionableClips
+        guard !clips.isEmpty else { return }
+        batchDeletePending = clips
+    }
+
+    /// Deletes each clip via the same single-clip store call used by the
+    /// confirmation alert, then clears the selection.
+    private func performBatchDelete(_ clips: [Clip]) {
+        for clip in clips { store.delete(clip) }
+        selectedClipIDs = []
+    }
+
+    /// Generate and apply an AI title for every selected text clip, non-interactively.
+    /// Runs on the main actor (network awaits suspend off-main); each title is set
+    /// via the store's title setter, so clip content is never overwritten.
+    private func runBatchAITitles() {
+        let targets = actionableClips.filter { $0.contentKind == .text }
+        guard !targets.isEmpty else { return }
+        guard case .success(let service) = AIService.fromSettings() else {
+            showStatusBanner("AI isn't configured. Open Settings to set it up.")
+            return
+        }
+        guard let titleAction = AIActionStore.shared.actions.first(where: { $0.name == "Suggest Title" })
+            ?? AIActionStore.shared.actions.first else {
+            showStatusBanner("No AI title action available.")
+            return
+        }
+        selectedClipIDs = []
+        showStatusBanner("Titling \(targets.count) clip\(targets.count == 1 ? "" : "s")...")
+        Task { @MainActor in
+            var done = 0
+            for clip in targets {
+                do {
+                    let proposal = try await service.run(action: titleAction, on: clip.contentText)
+                    let title = AIService.sanitizeTitle(proposal.proposed)
+                    if !title.isEmpty { store.renameClip(clip, userTitle: title) }
+                    done += 1
+                } catch {
+                    ClippyLog.error("Batch AI title failed: \(error)", category: ClippyLog.ai)
+                }
+            }
+            showStatusBanner("Titled \(done) of \(targets.count) clip\(targets.count == 1 ? "" : "s").")
+        }
     }
 
     /// Routes a "send keystrokes" request through a confirmation dialog when
@@ -240,7 +329,18 @@ struct ClipListView: View {
                     pasteSelected(shiftHeld: press.modifiers.contains(.shift))
                     return .handled
                 }
-                .onKeyPress(.escape) { onClose(); return .handled }
+                .onKeyPress(keys: ["a"]) { press in
+                    guard press.modifiers.contains(.command) else { return .ignored }
+                    selectedClipIDs = Set(visibleClips.compactMap { $0.id })
+                    return .handled
+                }
+                // Esc clears a multi-selection first; only when there is none does
+                // it fall through to closing the panel (the existing behavior).
+                .onKeyPress(.escape) {
+                    if !selectedClipIDs.isEmpty { selectedClipIDs = []; return .handled }
+                    onClose()
+                    return .handled
+                }
                 .onKeyPress(keys: ["e"]) { press in
                     guard press.modifiers.contains(.command),
                           let clip = selectedClip,
@@ -274,14 +374,6 @@ struct ClipListView: View {
                     selection = .category(categoryID)
                     return .handled
                 }
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(tokens.textSecondary)
-            }
-            .buttonStyle(.borderless)
-            .help("Clippy settings")
-            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -368,9 +460,15 @@ struct ClipListView: View {
     private func card(for clip: Clip, at index: Int) -> some View {
         let clipID = clip.id ?? -1
         let categoryID = activeCategoryID
+        // Highlight reflects the explicit multi-selection when one exists;
+        // otherwise it tracks the single keyboard-anchored row.
+        let isSelected: Bool = {
+            if selectedClipIDs.isEmpty { return index == selectedIndex }
+            return clip.id.map { selectedClipIDs.contains($0) } ?? false
+        }()
         return ClipCardView(
             clip: clip,
-            isSelected: index == selectedIndex,
+            isSelected: isSelected,
             isPinned: store.isPinned(clip),
             categoryColors: store.categories
                 .filter { category in
@@ -383,7 +481,10 @@ struct ClipListView: View {
                 get: { renamingClipID == clip.id },
                 set: { active in renamingClipID = active ? clip.id : nil }
             ),
-            onActivate: { onPrimary(clip) },
+            // The card's button action is now a plain single-click select.
+            // The actual paste/activate moved to the double-click gesture below
+            // so single-click selects and double-click pastes.
+            onActivate: { handleRowClick(clip, at: index, modifiers: []) },
             onPaste: { onPaste(clip, settings.pastePlainTextByDefault) },
             onPastePlain: { onPaste(clip, true) },
             onSendKeystrokes: { requestSendKeystrokes(clip) },
@@ -393,6 +494,25 @@ struct ClipListView: View {
             onRename: { store.renameClip(clip, userTitle: $0) }
         )
         .id(clip.id)
+        // Click semantics layered over the card's inner Button (whose plain
+        // single-click action selects). These high-priority gestures intercept
+        // the modified and double clicks before the Button's action fires:
+        //   Cmd-click   -> toggle this clip in the multi-selection
+        //   Shift-click -> extend the multi-selection range from the anchor
+        //   Double-click-> paste/activate (the old single-click behavior)
+        // Keyboard Return-to-paste is unchanged (see pasteSelected).
+        .highPriorityGesture(
+            TapGesture().modifiers(.command)
+                .onEnded { handleRowClick(clip, at: index, modifiers: .command) }
+        )
+        .highPriorityGesture(
+            TapGesture().modifiers(.shift)
+                .onEnded { handleRowClick(clip, at: index, modifiers: .shift) }
+        )
+        .highPriorityGesture(
+            TapGesture(count: 2)
+                .onEnded { onPrimary(clip) }
+        )
         // Drag payload is managed entirely by CategoryReorderModifier so that
         // only one .draggable is ever applied to this view. Two stacked
         // .draggable modifiers on the same view cause SwiftUI to use only the
@@ -404,37 +524,60 @@ struct ClipListView: View {
             store: store
         ))
         .contextMenu {
-            Button("Paste") { onPaste(clip, false) }
-            if clip.contentKind == .text {
-                Button("Paste as Plain Text") { onPaste(clip, true) }
-                Divider()
-                Button("Edit...") { onEdit(clip) }
-            }
-            if clip.contentKind == .image {
-                Divider()
-                Button {
-                    ocrProcessingClipID = clip.id
-                    store.extractText(from: clip) { message in
-                        ocrProcessingClipID = nil
-                        ocrStatusMessage = message
-                        // Auto-dismiss after 3 seconds.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            if ocrStatusMessage == message { ocrStatusMessage = nil }
+            if selectedClipIDs.count >= 2 {
+                // Batch variants act on the whole multi-selection.
+                Button("Paste \(selectedClipIDs.count) Sequentially") { onPasteMany(actionableClips, false, settings.pastePlainTextByDefault) }
+                Button("Paste \(selectedClipIDs.count) Combined") { onPasteMany(actionableClips, true, settings.pastePlainTextByDefault) }
+                Menu("Move \(selectedClipIDs.count) to Category") {
+                    ForEach(store.categories) { cat in
+                        Button(cat.name) {
+                            for clip in actionableClips { if let id = clip.id, let cid = cat.id { store.fileClip(id: id, intoCategory: cid) } }
+                            selectedClipIDs = []
                         }
                     }
-                } label: {
-                    Label("Extract Text", systemImage: "text.viewfinder")
                 }
+                if let activeCategoryID = activeCategoryID {
+                    Button("Remove \(selectedClipIDs.count) from Category") {
+                        for clip in actionableClips { store.setClip(clip, inCategory: activeCategoryID, false) }
+                        selectedClipIDs = []
+                    }
+                }
+                Button("Set \(selectedClipIDs.count) Titles with AI") { runBatchAITitles() }
+                Divider()
+                Button("Delete \(selectedClipIDs.count)", role: .destructive) { requestBatchDelete() }
+            } else {
+                Button("Paste") { onPaste(clip, false) }
+                if clip.contentKind == .text {
+                    Button("Paste as Plain Text") { onPaste(clip, true) }
+                    Divider()
+                    Button("Edit...") { onEdit(clip) }
+                }
+                if clip.contentKind == .image {
+                    Divider()
+                    Button {
+                        ocrProcessingClipID = clip.id
+                        store.extractText(from: clip) { message in
+                            ocrProcessingClipID = nil
+                            ocrStatusMessage = message
+                            // Auto-dismiss after 3 seconds.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                if ocrStatusMessage == message { ocrStatusMessage = nil }
+                            }
+                        }
+                    } label: {
+                        Label("Extract Text", systemImage: "text.viewfinder")
+                    }
+                }
+                // "Rename..." works for all clip kinds, not just text.
+                Button("Rename...") { renamingClipID = clip.id }
+                Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
+                if clip.contentKind == .text {
+                    aiActionsMenu(for: clip)
+                }
+                categoriesMenu(for: clip)
+                Divider()
+                Button("Delete", role: .destructive) { requestDelete(clip) }
             }
-            // "Rename..." works for all clip kinds, not just text.
-            Button("Rename...") { renamingClipID = clip.id }
-            Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
-            if clip.contentKind == .text {
-                aiActionsMenu(for: clip)
-            }
-            categoriesMenu(for: clip)
-            Divider()
-            Button("Delete", role: .destructive) { requestDelete(clip) }
         }
         .popover(
             isPresented: Binding(
@@ -532,7 +675,14 @@ struct ClipListView: View {
                 let categoryID = category.id ?? -1
                 let isMember = store.categoryIDs(for: clip).contains(categoryID)
                 Button {
-                    store.setClip(clip, inCategory: categoryID, !isMember)
+                    if isMember {
+                        // Tapping a member category removes the clip from it.
+                        store.setClip(clip, inCategory: categoryID, false)
+                    } else if let clipID = clip.id {
+                        // Filing routes through fileClip so single-membership mode
+                        // clears the other categories; multiple-mode stays additive.
+                        store.fileClip(id: clipID, intoCategory: categoryID)
+                    }
                 } label: {
                     if isMember {
                         Label(category.name, systemImage: "checkmark")
@@ -589,8 +739,42 @@ struct ClipListView: View {
         }
     }
 
+    // MARK: - Batch action bar
+
+    /// Shown above the footer when 2+ clips are selected. Operates on
+    /// `actionableClips` so it tracks the live multi-selection.
+    private var batchActionBar: some View {
+        HStack(spacing: 10) {
+            batchButton("Paste Seq.", "list.number") {
+                onPasteMany(actionableClips, false, settings.pastePlainTextByDefault)
+            }
+            batchButton("Paste Joined", "rectangle.compress.vertical") {
+                onPasteMany(actionableClips, true, settings.pastePlainTextByDefault)
+            }
+            batchButton("Delete", "trash") { requestBatchDelete() }
+            batchButton("AI Titles", "sparkles") { runBatchAITitles() }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(tokens.footerBar.opacity(settings.panelOpacity))
+    }
+
+    private func batchButton(_ label: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: symbol).font(PanelTypography.metadata(settings))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var footer: some View {
         HStack(spacing: 14) {
+            if selectedClipIDs.count >= 2 {
+                Text("\(selectedClipIDs.count) selected")
+                    .font(PanelTypography.micro(settings))
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(tokens.accent.opacity(0.18), in: Capsule())
+                    .foregroundStyle(tokens.accent)
+            }
             keyHint("\u{21A9}", settings.pastePlainTextByDefault ? "paste plain" : "paste")
             keyHint("\u{21E7}\u{21A9}", settings.pastePlainTextByDefault ? "formatted" : "plain")
             keyHint("\u{2318}P", "pin")
@@ -632,6 +816,31 @@ struct ClipListView: View {
     private func moveSelection(by delta: Int) {
         guard !visibleClips.isEmpty else { return }
         selectedIndex = max(0, min(visibleClips.count - 1, selectedIndex + delta))
+    }
+
+    /// Single-click selection with macOS modifier semantics:
+    /// - Cmd: toggle this clip in/out of the multi-selection.
+    /// - Shift: extend the multi-selection from the anchor (`selectedIndex`) to here.
+    /// - Plain: clear the multi-selection and anchor on this clip.
+    /// In every case `selectedIndex` is moved to the clicked row so the keyboard
+    /// anchor and Return-to-paste stay in sync with the mouse.
+    private func handleRowClick(_ clip: Clip, at index: Int, modifiers: EventModifiers) {
+        guard let id = clip.id else { return }
+        if modifiers.contains(.command) {
+            if selectedClipIDs.contains(id) { selectedClipIDs.remove(id) } else { selectedClipIDs.insert(id) }
+            selectedIndex = index
+        } else if modifiers.contains(.shift) {
+            guard !visibleClips.isEmpty else { return }
+            let upper = visibleClips.count - 1
+            let lo = max(0, min(selectedIndex, index))
+            let hi = min(upper, max(selectedIndex, index))
+            let rangeIDs = visibleClips[lo...hi].compactMap { $0.id }
+            selectedClipIDs.formUnion(rangeIDs)
+            selectedIndex = index
+        } else {
+            selectedClipIDs = []          // plain click clears multi-select
+            selectedIndex = index
+        }
     }
 
     private func pasteSelected(shiftHeld: Bool) {
