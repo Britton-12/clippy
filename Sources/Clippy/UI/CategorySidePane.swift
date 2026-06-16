@@ -245,32 +245,34 @@ struct CategorySidePane: View {
         help: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                icon()
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
-                Text(title)
-                    .font(PanelTypography.metadata(settings).weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(tokens.textPrimary)
-                    .lineLimit(1)
-                Spacer(minLength: 2)
-                if let count {
-                    Text("\(count)")
-                        .font(PanelTypography.micro(settings))
-                        .foregroundStyle(tokens.textSecondary)
-                        .monospacedDigit()
-                }
+        // Plain tappable row, not a Button. A Button captures the press, so the
+        // outer .reorderDraggable on category rows would never start a drag. A
+        // normal-precedence .onTapGesture selects on click while leaving
+        // press-and-move free to begin the reorder drag.
+        HStack(spacing: 7) {
+            icon()
+                .foregroundStyle(tint)
+                .frame(width: 18)
+            Text(title)
+                .font(PanelTypography.metadata(settings).weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(tokens.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 2)
+            if let count {
+                Text("\(count)")
+                    .font(PanelTypography.micro(settings))
+                    .foregroundStyle(tokens.textSecondary)
+                    .monospacedDigit()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                isSelected ? AnyShapeStyle(tint.opacity(0.16)) : AnyShapeStyle(.clear),
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            isSelected ? AnyShapeStyle(tint.opacity(0.16)) : AnyShapeStyle(.clear),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
         .help(help)
     }
 }
