@@ -23,6 +23,8 @@ struct ThemeTokens {
     var textPrimary: Color      // titles, body copy
     var textSecondary: Color    // dates, badges, captions
     var accent: Color           // selection, links, active state
+    var success: Color          // positive/confirmation state (e.g. copied)
+    var danger: Color           // destructive/error state (e.g. delete)
     var isDark: Bool            // drives scrollbar knob style and NSAppearance
 }
 
@@ -75,7 +77,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#FFFFFF"), footerBar: hex("#F6F8FA"),
                 sidebar: hex("#F6F8FA"), scrollbar: hex("#AfB8C1"),
                 textPrimary: hex("#1F2328"), textSecondary: hex("#656D76"),
-                accent: hex("#0969DA"), isDark: false
+                accent: hex("#0969DA"),
+                success: Color(nsColor: .systemGreen), danger: Color(nsColor: .systemRed),
+                isDark: false
             )
         case .githubDark:
             return ThemeTokens(
@@ -84,7 +88,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#161B22"), footerBar: hex("#161B22"),
                 sidebar: hex("#0D1117"), scrollbar: hex("#484F58"),
                 textPrimary: hex("#E6EDF3"), textSecondary: hex("#8B949E"),
-                accent: hex("#2F81F7"), isDark: true
+                accent: hex("#2F81F7"),
+                success: hex("#3FB950"), danger: hex("#F85149"),
+                isDark: true
             )
         case .dracula:
             return ThemeTokens(
@@ -93,7 +99,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#21222C"), footerBar: hex("#21222C"),
                 sidebar: hex("#21222C"), scrollbar: hex("#6272A4"),
                 textPrimary: hex("#F8F8F2"), textSecondary: hex("#A6ACCD"),
-                accent: hex("#BD93F9"), isDark: true
+                accent: hex("#BD93F9"),
+                success: hex("#50FA7B"), danger: hex("#FF5555"),
+                isDark: true
             )
         case .materialDarkPlus:
             return ThemeTokens(
@@ -102,7 +110,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#1E1E1E"), footerBar: hex("#1E1E1E"),
                 sidebar: hex("#181818"), scrollbar: hex("#3A3A3A"),
                 textPrimary: hex("#FFFFFF"), textSecondary: hex("#B0B0B0"),
-                accent: hex("#03DAC6"), isDark: true
+                accent: hex("#03DAC6"),
+                success: hex("#A5D6A7"), danger: hex("#EF9A9A"),
+                isDark: true
             )
         case .nord:
             return ThemeTokens(
@@ -111,7 +121,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#272B35"), footerBar: hex("#272B35"),
                 sidebar: hex("#272B35"), scrollbar: hex("#4C566A"),
                 textPrimary: hex("#ECEFF4"), textSecondary: hex("#A9B3C6"),
-                accent: hex("#88C0D0"), isDark: true
+                accent: hex("#88C0D0"),
+                success: hex("#A3BE8C"), danger: hex("#BF616A"),
+                isDark: true
             )
         case .oneDark:
             return ThemeTokens(
@@ -122,7 +134,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 // #9299A8 lifts this from 3.98:1 to 4.90:1 on the panel background,
                 // meeting WCAG AA (4.5:1) without making secondary text feel heavy.
                 textPrimary: hex("#ABB2BF"), textSecondary: hex("#9299A8"),
-                accent: hex("#61AFEF"), isDark: true
+                accent: hex("#61AFEF"),
+                success: hex("#98C379"), danger: hex("#E06C75"),
+                isDark: true
             )
         case .solarizedDark:
             return ThemeTokens(
@@ -131,7 +145,9 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 headerBar: hex("#00252E"), footerBar: hex("#00252E"),
                 sidebar: hex("#00252E"), scrollbar: hex("#586E75"),
                 textPrimary: hex("#EEE8D5"), textSecondary: hex("#93A1A1"),
-                accent: hex("#268BD2"), isDark: true
+                accent: hex("#268BD2"),
+                success: hex("#859900"), danger: hex("#DC322F"),
+                isDark: true
             )
         case .system, .custom:
             return nil
@@ -194,6 +210,9 @@ enum Theme {
             textPrimary: Color(themeHex: s.customTextPrimaryHex, fallback: seed.textPrimary),
             textSecondary: Color(themeHex: s.customTextSecondaryHex, fallback: seed.textSecondary),
             accent: Color(themeHex: s.customAccentHex, fallback: seed.accent),
+            // Semantic success/danger are not user-customizable; fall back to
+            // system semantics so destructive/confirm states stay legible.
+            success: Color(nsColor: .systemGreen), danger: Color(nsColor: .systemRed),
             isDark: s.customIsDark
         )
     }
@@ -219,6 +238,7 @@ enum Theme {
             // semantic color, which resolves to ~#8E8E9A and already passes at ~5.26:1.
             textSecondary: dark ? Color(nsColor: .secondaryLabelColor) : Color(themeHex: "#6E6E6E"),
             accent: s.accentColor,
+            success: Color(nsColor: .systemGreen), danger: Color(nsColor: .systemRed),
             isDark: dark
         )
     }
