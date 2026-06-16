@@ -495,3 +495,135 @@ enum AIAgentProviderFactory {
         }
     }
 }
+
+// MARK: - Streaming accumulators
+//
+// Pure, stateful parsers that turn raw stream lines into text deltas + tool
+// calls. They have no networking and no wiring yet; later tasks feed them.
+
+/// Accumulates OpenAI/Azure chat-completions SSE deltas into events.
+/// Pure: feed each raw SSE line; text is returned immediately, tool calls are
+/// assembled from fragments and read out at the end via `finishToolCalls()`.
+struct OpenAIStreamAccumulator {
+    private var toolFragments: [Int: (id: String, name: String, args: String)] = [:]
+    private var sawToolCalls = false
+
+    mutating func consume(line: String) -> String? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        if payload == "[DONE]" { return nil }
+        guard let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let delta = choices.first?["delta"] as? [String: Any] else { return nil }
+        if let calls = delta["tool_calls"] as? [[String: Any]] {
+            sawToolCalls = true
+            for tc in calls {
+                let idx = tc["index"] as? Int ?? 0
+                var entry = toolFragments[idx] ?? (id: "", name: "", args: "")
+                if let id = tc["id"] as? String { entry.id = id }
+                if let fn = tc["function"] as? [String: Any] {
+                    if let n = fn["name"] as? String { entry.name = n }
+                    if let a = fn["arguments"] as? String { entry.args += a }
+                }
+                toolFragments[idx] = entry
+            }
+        }
+        if let content = delta["content"] as? String, !content.isEmpty { return content }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] {
+        guard sawToolCalls else { return [] }
+        return toolFragments.sorted { $0.key < $1.key }.compactMap { _, frag in
+            guard !frag.name.isEmpty else { return nil }
+            let args = (frag.args.data(using: .utf8)
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+            return AIToolCall(id: frag.id.isEmpty ? "openai-\(frag.name)" : frag.id,
+                              toolName: frag.name, arguments: args)
+        }
+    }
+}
+
+/// Accumulates Anthropic Messages SSE events into text deltas + tool calls.
+struct AnthropicStreamAccumulator {
+    private var blocks: [Int: (type: String, id: String, name: String, json: String)] = [:]
+    private var stopReason = ""
+
+    mutating func consume(line: String) -> String? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = root["type"] as? String else { return nil }
+        switch type {
+        case "content_block_start":
+            let idx = root["index"] as? Int ?? 0
+            if let block = root["content_block"] as? [String: Any] {
+                let t = block["type"] as? String ?? ""
+                blocks[idx] = (type: t, id: block["id"] as? String ?? "",
+                               name: block["name"] as? String ?? "", json: "")
+            }
+        case "content_block_delta":
+            let idx = root["index"] as? Int ?? 0
+            if let delta = root["delta"] as? [String: Any] {
+                if let t = delta["text"] as? String, (delta["type"] as? String) == "text_delta" {
+                    return t
+                }
+                if let pj = delta["partial_json"] as? String,
+                   (delta["type"] as? String) == "input_json_delta" {
+                    blocks[idx]?.json += pj
+                }
+            }
+        case "message_delta":
+            if let d = root["delta"] as? [String: Any], let sr = d["stop_reason"] as? String {
+                stopReason = sr
+            }
+        default:
+            break
+        }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] {
+        guard stopReason == "tool_use" else { return [] }
+        return blocks.sorted { $0.key < $1.key }.compactMap { _, b in
+            guard b.type == "tool_use" else { return nil }
+            let args = (b.json.data(using: .utf8)
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+            return AIToolCall(id: b.id, toolName: b.name, arguments: args)
+        }
+    }
+}
+
+/// Accumulates Ollama /api/chat JSONL lines into text deltas + tool calls.
+struct OllamaStreamAccumulator {
+    private var pendingToolCalls: [AIToolCall] = []
+
+    mutating func consume(line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = root["message"] as? [String: Any] else { return nil }
+        if let calls = message["tool_calls"] as? [[String: Any]], !calls.isEmpty {
+            var idx = 0
+            pendingToolCalls = calls.compactMap { tc in
+                guard let fn = tc["function"] as? [String: Any],
+                      let name = fn["name"] as? String else { return nil }
+                let args: [String: Any]
+                if let d = fn["arguments"] as? [String: Any] { args = d }
+                else if let s = fn["arguments"] as? String,
+                        let dd = s.data(using: .utf8),
+                        let d = try? JSONSerialization.jsonObject(with: dd) as? [String: Any] { args = d }
+                else { args = [:] }
+                idx += 1
+                return AIToolCall(id: "ollama-\(idx)", toolName: name, arguments: args)
+            }
+        }
+        if let content = message["content"] as? String, !content.isEmpty { return content }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] { pendingToolCalls }
+}
