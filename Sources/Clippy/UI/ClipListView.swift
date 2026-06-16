@@ -205,16 +205,37 @@ struct ClipListView: View {
         selectedClipIDs = []
     }
 
-    /// Runs the built-in "Suggest Title" AI action against each selected text
-    /// clip. See the concern in the batch action bar: runAIAction drives a single
-    /// shared proposal sheet, so in practice only the last clip's proposal
-    /// surfaces; the loop is kept so the wiring matches the single-clip path.
+    /// Generate and apply an AI title for every selected text clip, non-interactively.
+    /// Runs on the main actor (network awaits suspend off-main); each title is set
+    /// via the store's title setter, so clip content is never overwritten.
     private func runBatchAITitles() {
+        let targets = actionableClips.filter { $0.contentKind == .text }
+        guard !targets.isEmpty else { return }
+        guard case .success(let service) = AIService.fromSettings() else {
+            showStatusBanner("AI isn't configured. Open Settings to set it up.")
+            return
+        }
         guard let titleAction = AIActionStore.shared.actions.first(where: { $0.name == "Suggest Title" })
-            ?? AIActionStore.shared.actions.first
-        else { return }
-        let clips = actionableClips.filter { $0.contentKind == .text }
-        for clip in clips { runAIAction(titleAction, on: clip) }
+            ?? AIActionStore.shared.actions.first else {
+            showStatusBanner("No AI title action available.")
+            return
+        }
+        selectedClipIDs = []
+        showStatusBanner("Titling \(targets.count) clip\(targets.count == 1 ? "" : "s")...")
+        Task { @MainActor in
+            var done = 0
+            for clip in targets {
+                do {
+                    let proposal = try await service.run(action: titleAction, on: clip.contentText)
+                    let title = AIService.sanitizeTitle(proposal.proposed)
+                    if !title.isEmpty { store.renameClip(clip, userTitle: title) }
+                    done += 1
+                } catch {
+                    ClippyLog.error("Batch AI title failed: \(error)", category: ClippyLog.ai)
+                }
+            }
+            showStatusBanner("Titled \(done) of \(targets.count) clip\(targets.count == 1 ? "" : "s").")
+        }
     }
 
     /// Routes a "send keystrokes" request through a confirmation dialog when
