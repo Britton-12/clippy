@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 // MARK: - Message model
 
@@ -27,15 +28,14 @@ struct AssistantMessage: Identifiable {
 /// when the panel closes (persistence is intentionally out of scope for v1).
 @MainActor
 final class AIAssistantViewModel: ObservableObject {
-    enum State: Equatable {
-        case ready
-        case thinking
-        case notConfigured(String)   // human-readable reason
-    }
+    enum State: Equatable { case ready, streaming, notConfigured(String) }
 
     @Published private(set) var messages: [AssistantMessage] = []
     @Published private(set) var state: State = .ready
     @Published var inputText: String = ""
+
+    /// The in-flight streaming turn, so it can be cancelled by `stop()`.
+    private var runningTask: Task<Void, Never>?
 
     // Confirmation sheet state
     @Published var pendingConfirmation: PendingConfirmation?
@@ -79,7 +79,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         // Append the user turn.
         messages.append(AssistantMessage(role: .user, text: text))
-        state = .thinking
+        state = .streaming
 
         let userMessage = AssistantMessage(role: .assistant, text: "")
         messages.append(userMessage)
@@ -87,40 +87,59 @@ final class AIAssistantViewModel: ObservableObject {
 
         let history = buildHistory()
 
-        Task { [weak self] in
+        let registry = AIToolRegistry.makeFiltered(
+            allowScripts: settings.aiAgentAllowScripts,
+            allowCodeExecution: settings.aiAgentAllowCodeExecution,
+            confirmHook: { [weak self] prompt in
+                guard let self else { return false }
+                return await self.askConfirmation(prompt)
+            }
+        )
+
+        runningTask = Task { [weak self] in
             guard let self else { return }
-
-            let registry = AIToolRegistry.makeFiltered(
-                allowScripts: settings.aiAgentAllowScripts,
-                allowCodeExecution: settings.aiAgentAllowCodeExecution,
-                confirmHook: { [weak self] prompt in
-                    guard let self else { return false }
-                    return await self.askConfirmation(prompt)
-                }
-            )
-
+            defer { self.state = .ready; self.runningTask = nil }   // ALWAYS resets — kills the freeze class
+            var buffer = ""
+            var lastFlush = Date()
+            // Local closure rather than a nested func so it inherits the
+            // enclosing Task's main-actor isolation and may mutate `messages`.
+            let flush = { @MainActor in
+                guard !buffer.isEmpty else { return }
+                self.messages[assistantIndex].text += buffer
+                buffer = ""
+                lastFlush = Date()
+            }
             do {
-                let answer = try await AIAgent.completeWithTools(
-                    messages: history,
-                    provider: provider,
-                    tools: registry.all
-                )
-                self.messages[assistantIndex].text = answer
-                self.state = .ready
+                for try await event in AIAgent.streamWithTools(messages: history, provider: provider, tools: registry.all) {
+                    if Task.isCancelled { break }
+                    switch event {
+                    case .textDelta(let t):
+                        buffer += t
+                        if Date().timeIntervalSince(lastFlush) > 0.05 { flush() }   // ~20fps coalesce
+                    case .toolStarted(let name):
+                        flush()
+                        self.messages[assistantIndex].toolActivities.append(.running(name))
+                    case .toolFinished(let name):
+                        if let i = self.messages[assistantIndex].toolActivities.firstIndex(of: .running(name)) {
+                            self.messages[assistantIndex].toolActivities[i] = .done(name)
+                        }
+                    }
+                }
+                flush()
+            } catch is CancellationError {
+                flush()
             } catch {
+                flush()
                 ClippyLog.error("AI agent error: \(error)", category: ClippyLog.ai)
-                self.messages[assistantIndex].text = error.localizedDescription
-                self.messages[assistantIndex].isError = true
-                self.state = .ready
+                if self.messages[assistantIndex].text.isEmpty {
+                    self.messages[assistantIndex].text = error.localizedDescription
+                    self.messages[assistantIndex].isError = true
+                }
             }
         }
     }
 
-    func clearConversation() {
-        messages = []
-        state = .ready
-        inputText = ""
-    }
+    func clearConversation() { stop(); messages = []; state = .ready; inputText = "" }
 
     // MARK: - Confirmation
 
@@ -136,8 +155,15 @@ final class AIAssistantViewModel: ObservableObject {
 
     func resolveConfirmation(_ allowed: Bool) {
         guard let confirmation = pendingConfirmation else { return }
-        pendingConfirmation = nil
+        pendingConfirmation = nil                       // clear FIRST so re-entry is a no-op
         confirmation.continuation?.resume(returning: allowed)
+    }
+
+    func cancelPendingConfirmation() { resolveConfirmation(false) }
+
+    func stop() {
+        cancelPendingConfirmation()
+        runningTask?.cancel()
     }
 
     // MARK: - Helpers
@@ -167,19 +193,25 @@ struct AIAssistantPanelView: View {
     private var tokens: ThemeTokens { settings.theme }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-            Divider()
-            inputBar
-        }
-        .sheet(item: $vm.pendingConfirmation) { confirmation in
-            ToolConfirmationSheet(
-                prompt: confirmation.prompt,
-                onAllow: { vm.resolveConfirmation(true) },
-                onDeny: { vm.resolveConfirmation(false) }
-            )
+        ZStack {
+            VStack(spacing: 0) {
+                header
+                Divider()
+                content
+                Divider()
+                inputBar
+            }
+            if let confirmation = vm.pendingConfirmation {
+                Color.black.opacity(0.25).ignoresSafeArea()
+                    .onTapGesture { vm.cancelPendingConfirmation() }
+                InlineConfirmationCard(
+                    prompt: confirmation.prompt,
+                    tokens: tokens, settings: settings,
+                    onAllow: { vm.resolveConfirmation(true) },
+                    onDeny: { vm.resolveConfirmation(false) }
+                )
+                .padding(24)
+            }
         }
     }
 
@@ -294,7 +326,7 @@ struct AIAssistantPanelView: View {
                         MessageBubble(message: message, tokens: tokens, settings: settings)
                             .id(message.id)
                     }
-                    if vm.state == .thinking {
+                    if showThinkingIndicator {
                         thinkingIndicator
                             .id("thinking")
                     }
@@ -308,11 +340,17 @@ struct AIAssistantPanelView: View {
                 }
             }
             .onChange(of: vm.state) { _, newState in
-                if newState == .thinking {
+                if newState == .streaming {
                     withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
                 }
             }
         }
+    }
+
+    /// Show the typing indicator only while streaming AND before the first
+    /// token lands in the live assistant bubble, so it disappears once text arrives.
+    private var showThinkingIndicator: Bool {
+        vm.state == .streaming && (vm.messages.last?.text.isEmpty ?? false)
     }
 
     private var thinkingIndicator: some View {
@@ -367,23 +405,17 @@ struct AIAssistantPanelView: View {
                 }
                 .onAppear { inputFocused = true }
             Button {
-                vm.send()
+                if vm.state == .streaming { vm.stop() } else { vm.send() }
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
+                Image(systemName: vm.state == .streaming ? "stop.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 22))
                     .foregroundStyle(
-                        vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || vm.state == .thinking
-                        ? tokens.textSecondary
-                        : tokens.accent
-                    )
+                        vm.state == .streaming ? tokens.accent
+                        : (vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tokens.textSecondary : tokens.accent))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Send")
-            .disabled(
-                vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || vm.state == .thinking
-            )
+            .accessibilityLabel(vm.state == .streaming ? "Stop" : "Send")
+            .disabled(vm.state != .streaming && vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -409,12 +441,13 @@ private struct MessageBubble: View {
                               systemImage: "exclamationmark.triangle.fill")
                             .font(PanelTypography.body(settings))
                             .foregroundStyle(Color(nsColor: .systemOrange))
+                    } else if message.role == .assistant {
+                        Markdown(message.text.isEmpty ? " " : message.text)
+                            .markdownTheme(.clippy(tokens: tokens, settings: settings))
                     } else {
                         Text(message.text.isEmpty ? " " : message.text)
                             .font(PanelTypography.body(settings))
-                            .foregroundStyle(message.role == .user
-                                ? (tokens.isDark ? Color.white : Color(nsColor: .labelColor).opacity(0.9))
-                                : tokens.textPrimary)
+                            .foregroundStyle(tokens.isDark ? Color.white : Color(nsColor: .labelColor).opacity(0.9))
                     }
                 }
                 .textSelection(.enabled)
@@ -458,48 +491,45 @@ private struct MessageBubble: View {
     }
 }
 
-// MARK: - Tool confirmation sheet
+// MARK: - Inline confirmation card
 
-/// Shown when the agent wants to run a gated tool (run_script, execute_code).
-/// The user sees the full prompt before deciding.
-struct ToolConfirmationSheet: View {
+/// Shown as an overlay when the agent wants to run a gated tool (run_script,
+/// execute_code). The user sees the full prompt before deciding.
+private struct InlineConfirmationCard: View {
     let prompt: String
+    let tokens: ThemeTokens
+    let settings: AppSettings
     let onAllow: () -> Void
     let onDeny: () -> Void
 
-    @ObservedObject private var settings = AppSettings.shared
-    private var tokens: ThemeTokens { settings.theme }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Tool Confirmation Required", systemImage: "exclamationmark.shield")
-                .font(.headline)
-            Text("The AI assistant wants to perform the following action. Review it carefully before allowing.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Confirm action", systemImage: "exclamationmark.shield")
+                .font(PanelTypography.body(settings).weight(.semibold))
+                .foregroundStyle(tokens.textPrimary)
+            Text("The assistant wants to run this. Review before allowing.")
+                .font(PanelTypography.metadata(settings))
+                .foregroundStyle(tokens.textSecondary)
             ScrollView {
                 Text(prompt)
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 160)
             .padding(8)
-            .frame(maxHeight: 200)
             .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(tokens.cardBorder, lineWidth: 1)
-            )
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(tokens.cardBorder, lineWidth: 1))
             HStack {
-                Button("Deny", role: .cancel) { onDeny() }
-                    .keyboardShortcut(.escape, modifiers: [])
+                Button("Deny", role: .cancel, action: onDeny).keyboardShortcut(.escape, modifiers: [])
                 Spacer()
-                Button("Allow") { onAllow() }
-                    .keyboardShortcut(.return, modifiers: [])
-                    .buttonStyle(.borderedProminent)
+                Button("Allow", action: onAllow).keyboardShortcut(.return, modifiers: []).buttonStyle(.borderedProminent)
             }
         }
-        .padding(20)
-        .frame(minWidth: 400, idealWidth: 440)
+        .padding(18)
+        .frame(maxWidth: 420)
+        .background(tokens.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(tokens.cardBorder, lineWidth: 1))
+        .shadow(radius: 20)
     }
 }
