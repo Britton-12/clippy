@@ -35,6 +35,36 @@ final class ScriptedAgentProvider: AIAgentProvider {
         case .calls(let c): return .toolCalls(c)
         }
     }
+
+    func streamWithTools(
+        _ messages: [AIMessage],
+        tools: [AITool],
+        options: AICompletionOptions
+    ) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                defer {
+                    index += 1
+                    callCount += 1
+                    continuation.finish()
+                }
+
+                guard index < steps.count else {
+                    continuation.yield(.done)
+                    return
+                }
+
+                switch steps[index] {
+                case .text(let t):
+                    if !t.isEmpty { continuation.yield(.textDelta(t)) }
+                case .calls(let c):
+                    continuation.yield(.toolCalls(c))
+                }
+
+                continuation.yield(.done)
+            }
+        }
+    }
 }
 
 /// A tool that records invocations and returns a canned string.
@@ -460,6 +490,26 @@ final class AIAgentLoopTests: XCTestCase {
                 messages.append(m)
                 defer { step += 1 }
                 return step == 0 ? .toolCalls([toolCall]) : .text("answer")
+            }
+
+            func streamWithTools(
+                _ m: [AIMessage],
+                tools: [AITool],
+                options: AICompletionOptions
+            ) -> AsyncThrowingStream<AIStreamEvent, Error> {
+                messages.append(m)
+                let currentStep = step
+                step += 1
+
+                return AsyncThrowingStream { continuation in
+                    if currentStep == 0 {
+                        continuation.yield(.toolCalls([toolCall]))
+                    } else {
+                        continuation.yield(.textDelta("answer"))
+                    }
+                    continuation.yield(.done)
+                    continuation.finish()
+                }
             }
         }
 
