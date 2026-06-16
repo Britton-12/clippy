@@ -44,6 +44,9 @@ struct ClipListView: View {
     /// there is one confirmation entry point and deletion is never destructive
     /// without a prompt.
     @State private var clipPendingDeletion: Clip?
+    /// The clips awaiting batch-delete confirmation. Nil when no batch delete is
+    /// pending; routes every multi-selection delete through one confirmation gate.
+    @State private var batchDeletePending: [Clip]?
     /// The clip waiting for the user to confirm a large keystroke action. Nil
     /// when the clip is below the warn threshold or no action is pending.
     @State private var clipPendingKeystrokes: Clip?
@@ -108,6 +111,7 @@ struct ClipListView: View {
                 }
             }
             Divider()
+            if selectedClipIDs.count >= 2 { batchActionBar; Divider() }
             footer
         }
         .background(ThemedPanelBackground(tokens: tokens, opacity: settings.panelOpacity))
@@ -145,6 +149,21 @@ struct ClipListView: View {
         } message: { _ in
             Text("This permanently removes the clip from your history.")
         }
+        // Batch delete confirmation. Mirrors the single-clip gate above so the
+        // multi-selection delete path is just as non-destructive.
+        .alert(
+            "Delete \(batchDeletePending?.count ?? 0) clips?",
+            isPresented: Binding(
+                get: { batchDeletePending != nil },
+                set: { if !$0 { batchDeletePending = nil } }
+            ),
+            presenting: batchDeletePending
+        ) { clips in
+            Button("Delete", role: .destructive) { performBatchDelete(clips) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This permanently removes the selected clips from your history.")
+        }
         // Confirmation gate for large keystroke actions so an accidental click
         // does not type thousands of characters into the active app.
         .alert(
@@ -168,6 +187,34 @@ struct ClipListView: View {
     /// entry points call this instead of store.delete directly.
     private func requestDelete(_ clip: Clip) {
         clipPendingDeletion = clip
+    }
+
+    // MARK: - Batch actions
+
+    /// Stages the current multi-selection for deletion behind the batch alert.
+    private func requestBatchDelete() {
+        let clips = actionableClips
+        guard !clips.isEmpty else { return }
+        batchDeletePending = clips
+    }
+
+    /// Deletes each clip via the same single-clip store call used by the
+    /// confirmation alert, then clears the selection.
+    private func performBatchDelete(_ clips: [Clip]) {
+        for clip in clips { store.delete(clip) }
+        selectedClipIDs = []
+    }
+
+    /// Runs the built-in "Suggest Title" AI action against each selected text
+    /// clip. See the concern in the batch action bar: runAIAction drives a single
+    /// shared proposal sheet, so in practice only the last clip's proposal
+    /// surfaces; the loop is kept so the wiring matches the single-clip path.
+    private func runBatchAITitles() {
+        guard let titleAction = AIActionStore.shared.actions.first(where: { $0.name == "Suggest Title" })
+            ?? AIActionStore.shared.actions.first
+        else { return }
+        let clips = actionableClips.filter { $0.contentKind == .text }
+        for clip in clips { runAIAction(titleAction, on: clip) }
     }
 
     /// Routes a "send keystrokes" request through a confirmation dialog when
@@ -456,37 +503,60 @@ struct ClipListView: View {
             store: store
         ))
         .contextMenu {
-            Button("Paste") { onPaste(clip, false) }
-            if clip.contentKind == .text {
-                Button("Paste as Plain Text") { onPaste(clip, true) }
-                Divider()
-                Button("Edit...") { onEdit(clip) }
-            }
-            if clip.contentKind == .image {
-                Divider()
-                Button {
-                    ocrProcessingClipID = clip.id
-                    store.extractText(from: clip) { message in
-                        ocrProcessingClipID = nil
-                        ocrStatusMessage = message
-                        // Auto-dismiss after 3 seconds.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            if ocrStatusMessage == message { ocrStatusMessage = nil }
+            if selectedClipIDs.count >= 2 {
+                // Batch variants act on the whole multi-selection.
+                Button("Paste \(selectedClipIDs.count) Sequentially") { onPasteMany(actionableClips, false, settings.pastePlainTextByDefault) }
+                Button("Paste \(selectedClipIDs.count) Combined") { onPasteMany(actionableClips, true, settings.pastePlainTextByDefault) }
+                Menu("Move \(selectedClipIDs.count) to Category") {
+                    ForEach(store.categories) { cat in
+                        Button(cat.name) {
+                            for clip in actionableClips { if let id = clip.id, let cid = cat.id { store.fileClip(id: id, intoCategory: cid) } }
+                            selectedClipIDs = []
                         }
                     }
-                } label: {
-                    Label("Extract Text", systemImage: "text.viewfinder")
                 }
+                if let activeCategoryID = activeCategoryID {
+                    Button("Remove \(selectedClipIDs.count) from Category") {
+                        for clip in actionableClips { store.setClip(clip, inCategory: activeCategoryID, false) }
+                        selectedClipIDs = []
+                    }
+                }
+                Button("Set \(selectedClipIDs.count) Titles with AI") { runBatchAITitles() }
+                Divider()
+                Button("Delete \(selectedClipIDs.count)", role: .destructive) { requestBatchDelete() }
+            } else {
+                Button("Paste") { onPaste(clip, false) }
+                if clip.contentKind == .text {
+                    Button("Paste as Plain Text") { onPaste(clip, true) }
+                    Divider()
+                    Button("Edit...") { onEdit(clip) }
+                }
+                if clip.contentKind == .image {
+                    Divider()
+                    Button {
+                        ocrProcessingClipID = clip.id
+                        store.extractText(from: clip) { message in
+                            ocrProcessingClipID = nil
+                            ocrStatusMessage = message
+                            // Auto-dismiss after 3 seconds.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                if ocrStatusMessage == message { ocrStatusMessage = nil }
+                            }
+                        }
+                    } label: {
+                        Label("Extract Text", systemImage: "text.viewfinder")
+                    }
+                }
+                // "Rename..." works for all clip kinds, not just text.
+                Button("Rename...") { renamingClipID = clip.id }
+                Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
+                if clip.contentKind == .text {
+                    aiActionsMenu(for: clip)
+                }
+                categoriesMenu(for: clip)
+                Divider()
+                Button("Delete", role: .destructive) { requestDelete(clip) }
             }
-            // "Rename..." works for all clip kinds, not just text.
-            Button("Rename...") { renamingClipID = clip.id }
-            Button(store.isPinned(clip) ? "Unpin" : "Pin") { store.togglePin(clip) }
-            if clip.contentKind == .text {
-                aiActionsMenu(for: clip)
-            }
-            categoriesMenu(for: clip)
-            Divider()
-            Button("Delete", role: .destructive) { requestDelete(clip) }
         }
         .popover(
             isPresented: Binding(
@@ -646,6 +716,33 @@ struct ClipListView: View {
         case .scripts, .assistant:
             return ""
         }
+    }
+
+    // MARK: - Batch action bar
+
+    /// Shown above the footer when 2+ clips are selected. Operates on
+    /// `actionableClips` so it tracks the live multi-selection.
+    private var batchActionBar: some View {
+        HStack(spacing: 10) {
+            batchButton("Paste Seq.", "list.number") {
+                onPasteMany(actionableClips, false, settings.pastePlainTextByDefault)
+            }
+            batchButton("Paste Joined", "rectangle.compress.vertical") {
+                onPasteMany(actionableClips, true, settings.pastePlainTextByDefault)
+            }
+            batchButton("Delete", "trash") { requestBatchDelete() }
+            batchButton("AI Titles", "sparkles") { runBatchAITitles() }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(tokens.footerBar.opacity(settings.panelOpacity))
+    }
+
+    private func batchButton(_ label: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: symbol).font(PanelTypography.metadata(settings))
+        }
+        .buttonStyle(.plain)
     }
 
     private var footer: some View {
