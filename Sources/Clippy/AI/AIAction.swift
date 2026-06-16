@@ -177,11 +177,13 @@ final class AIActionStore: ObservableObject {
 
     @Published private(set) var actions: [AIAction] = []
 
-    private let fileURL: URL
+    private let store: JSONFileStore<AIAction>
 
     init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultURL()
-        load()
+        let url = fileURL ?? Self.defaultURL()
+        // AIAction has no Date fields, so no date strategy is needed.
+        store = JSONFileStore<AIAction>(fileURL: url)
+        actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
         seedDefaults()
     }
 
@@ -204,11 +206,13 @@ final class AIActionStore: ObservableObject {
                 // Append after the current last entry to preserve user order.
                 var seeded = builtIn
                 seeded.sortOrder = (actions.map(\.sortOrder).max() ?? -1) + 1
-                actions.append(seeded)
+                store.add(seeded)
+                actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
                 changed = true
             }
         }
-        if changed { save() }
+        // store.add already saves after each insertion; no extra save needed.
+        _ = changed
     }
 
     // MARK: - CRUD
@@ -216,21 +220,21 @@ final class AIActionStore: ObservableObject {
     func add(_ action: AIAction) {
         var a = action
         a.sortOrder = (actions.map(\.sortOrder).max() ?? -1) + 1
-        actions.append(a)
-        save()
+        store.add(a)
+        actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func update(_ action: AIAction) {
-        guard let index = actions.firstIndex(where: { $0.id == action.id }) else { return }
-        actions[index] = action
-        save()
+        guard actions.contains(where: { $0.id == action.id }) else { return }
+        store.update(action)
+        actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func delete(id: UUID) {
         // Built-ins may not be deleted.
         guard let target = actions.first(where: { $0.id == id }), !target.isBuiltIn else { return }
-        actions.removeAll { $0.id == id }
-        save()
+        store.delete(id: id)
+        actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func action(id: UUID) -> AIAction? {
@@ -241,33 +245,13 @@ final class AIActionStore: ObservableObject {
     /// action identified by `targetID`. Built-ins are reorderable (only deletion
     /// is restricted). Resequences all sortOrder values gap-free and persists.
     func moveAction(draggedID: UUID, before targetID: UUID) {
-        guard draggedID != targetID,
-              let fromIndex = actions.firstIndex(where: { $0.id == draggedID }),
-              actions.contains(where: { $0.id == targetID }) else { return }
-        var reordered = actions
-        let item = reordered.remove(at: fromIndex)
-        let insertAt = reordered.firstIndex(where: { $0.id == targetID }) ?? reordered.endIndex
-        reordered.insert(item, at: insertAt)
+        store.move(draggedID: draggedID, before: targetID)
         // Resequence gap-free so sortOrder always reflects array position.
+        // The generic store only reorders the array; sortOrder renumbering is
+        // AIAction-specific and stays here.
+        var reordered = store.items
         for i in reordered.indices { reordered[i].sortOrder = i }
-        actions = reordered
-        save()
-    }
-
-    // MARK: - Persistence
-
-    private func load() {
-        let decoder = JSONDecoder()
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? decoder.decode([AIAction].self, from: data) else { return }
-        // Sort by user-assigned order on every load.
-        actions = decoded.sorted { $0.sortOrder < $1.sortOrder }
-    }
-
-    private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(actions) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        for a in reordered { store.update(a) }
+        actions = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 }

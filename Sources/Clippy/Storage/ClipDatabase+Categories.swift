@@ -66,14 +66,15 @@ extension ClipDatabase {
     /// category's sortOrder sequentially so the order is stable and gap-free.
     func moveCategory(id: Int64, before targetID: Int64) throws {
         try dbQueue.write { db in
-            var cats = try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
-            guard let fromIndex = cats.firstIndex(where: { $0.id == id }) else { return }
-            let moving = cats.remove(at: fromIndex)
-            // Recompute the target index after the removal shifts things.
-            let insertIndex = cats.firstIndex(where: { $0.id == targetID }) ?? cats.count
-            cats.insert(moving, at: insertIndex)
-            for (index, category) in cats.enumerated() where category.sortOrder != index {
-                var updated = category
+            let cats = try Category.order(Column("sortOrder"), Column("createdAt")).fetchAll(db)
+            let ids = cats.map { $0.id! }
+            // Delegate ordering computation to the pure function; wrap the
+            // non-optional targetID so the signature matches.
+            let newIDs = reorderIDs(ids, draggedID: id, before: targetID)
+            // Build a lookup so we can avoid a linear scan per row.
+            let catByID = Dictionary(uniqueKeysWithValues: cats.compactMap { c in c.id.map { ($0, c) } })
+            for (index, catID) in newIDs.enumerated() {
+                guard var updated = catByID[catID], updated.sortOrder != index else { continue }
                 updated.sortOrder = index
                 try updated.update(db)
             }
@@ -170,19 +171,13 @@ extension ClipDatabase {
                     """,
                 arguments: [categoryID]
             )
-            var ids: [Int64] = rows.map { $0["clipID"] }
-            guard let fromIndex = ids.firstIndex(of: clipID) else { return }
-            ids.remove(at: fromIndex)
-            // Recompute insert position after the removal shifts indices.
-            let insertIndex: Int
-            if let target = targetClipID, let ti = ids.firstIndex(of: target) {
-                insertIndex = ti
-            } else {
-                insertIndex = ids.count
-            }
-            ids.insert(clipID, at: insertIndex)
+            let ids: [Int64] = rows.map { $0["clipID"] }
+            // Guard mirrors the original: skip entirely if clipID is not a member.
+            // reorderIDs returns ids unchanged in that case.
+            guard ids.contains(clipID) else { return }
+            let newIDs = reorderIDs(ids, draggedID: clipID, before: targetClipID)
             // Write back gap-free sortOrder values, touching only changed rows.
-            for (order, id) in ids.enumerated() {
+            for (order, id) in newIDs.enumerated() {
                 try db.execute(
                     sql: """
                         UPDATE clip_category SET sortOrder = ?

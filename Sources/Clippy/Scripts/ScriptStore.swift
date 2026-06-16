@@ -8,11 +8,33 @@ final class ScriptStore: ObservableObject {
 
     @Published private(set) var scripts: [Script] = []
 
-    private let fileURL: URL
+    private let store: JSONFileStore<Script>
 
     init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultURL()
-        load()
+        let url = fileURL ?? Self.defaultURL()
+        store = JSONFileStore<Script>(
+            fileURL: url,
+            configureEncoder: { $0.dateEncodingStrategy = .iso8601 },
+            configureDecoder: { $0.dateDecodingStrategy = .iso8601 }
+        )
+        // Migration: if all sortOrder values are 0 (first load after upgrade from a
+        // build without sortOrder), backfill sequential values from the current
+        // alphabetical order so the visible list does not jump.
+        let loaded = store.items
+        let allZero = loaded.allSatisfy { $0.sortOrder == 0 }
+        if allZero && loaded.count > 1 {
+            let alphabetical = loaded.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            let backfilled = alphabetical.enumerated().map { idx, s in
+                var s = s; s.sortOrder = idx; return s
+            }
+            // Update through the store so it persists.
+            for s in backfilled { store.update(s) }
+            scripts = store.items.sorted { $0.sortOrder < $1.sortOrder }
+        } else {
+            scripts = loaded.sorted { $0.sortOrder < $1.sortOrder }
+        }
     }
 
     static func defaultURL() -> URL {
@@ -28,21 +50,21 @@ final class ScriptStore: ObservableObject {
     func add(_ script: Script) {
         var s = script
         s.sortOrder = (scripts.map(\.sortOrder).max() ?? -1) + 1
-        scripts.append(s)
-        save()
+        store.add(s)
+        scripts = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func update(_ script: Script) {
-        guard let index = scripts.firstIndex(where: { $0.id == script.id }) else { return }
+        guard scripts.contains(where: { $0.id == script.id }) else { return }
         var updated = script
         updated.updatedAt = Date()
-        scripts[index] = updated
-        save()
+        store.update(updated)
+        scripts = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func delete(id: UUID) {
-        scripts.removeAll { $0.id == id }
-        save()
+        store.delete(id: id)
+        scripts = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func script(id: UUID) -> Script? {
@@ -53,49 +75,13 @@ final class ScriptStore: ObservableObject {
     /// script identified by `targetID`. Resequences all sortOrder values
     /// gap-free and persists.
     func moveScript(draggedID: UUID, before targetID: UUID) {
-        guard draggedID != targetID,
-              let fromIndex = scripts.firstIndex(where: { $0.id == draggedID }),
-              scripts.contains(where: { $0.id == targetID }) else { return }
-        var reordered = scripts
-        let item = reordered.remove(at: fromIndex)
-        let insertAt = reordered.firstIndex(where: { $0.id == targetID }) ?? reordered.endIndex
-        reordered.insert(item, at: insertAt)
+        store.move(draggedID: draggedID, before: targetID)
         // Resequence gap-free so sortOrder always reflects array position.
+        // The generic store only reorders the array; sortOrder renumbering is
+        // Script-specific and stays here.
+        var reordered = store.items
         for i in reordered.indices { reordered[i].sortOrder = i }
-        scripts = reordered
-        save()
-    }
-
-    // MARK: - Persistence
-
-    private func load() {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? decoder.decode([Script].self, from: data) else { return }
-
-        // Migration: if all sortOrder values are 0 (first load after upgrade from a
-        // build without sortOrder), backfill sequential values from the current
-        // alphabetical order so the visible list does not jump.
-        let allZero = decoded.allSatisfy { $0.sortOrder == 0 }
-        if allZero && decoded.count > 1 {
-            let alphabetical = decoded.sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-            scripts = alphabetical.enumerated().map { idx, s in
-                var s = s; s.sortOrder = idx; return s
-            }
-            save()
-        } else {
-            scripts = decoded.sorted { $0.sortOrder < $1.sortOrder }
-        }
-    }
-
-    private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(scripts) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        for s in reordered { store.update(s) }
+        scripts = store.items.sorted { $0.sortOrder < $1.sortOrder }
     }
 }
