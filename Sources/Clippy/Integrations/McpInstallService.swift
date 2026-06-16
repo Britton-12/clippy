@@ -139,60 +139,31 @@ enum McpInstallService {
     // MARK: - Claude binary lookup
 
     private static func findClaudeBinary() -> String? {
-        let candidates = [
+        Subprocess.findBinary(named: "claude", candidates: [
             "/opt/homebrew/bin/claude",
             "/usr/local/bin/claude",
             "/usr/bin/claude",
-        ]
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        // Login-shell fallback
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-l", "-c", "which claude"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let path = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        } catch {}
-        return nil
+        ])
     }
 
     // MARK: - CLI runner
 
     private static func runCLI(_ path: String, args: [String]) -> Result<String, Error> {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = args
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            if proc.terminationStatus == 0 {
-                let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-                return .success(String(data: data, encoding: .utf8) ?? "")
+        // Subprocess.run is async; runCLI is called from synchronous install paths,
+        // so we block a background thread here. The call sites already run off-main.
+        var result: Result<String, Error> = .failure(McpInstallError.cliFailed("not started"))
+        let sem = DispatchSemaphore(value: 0)
+        Task.detached {
+            let output = await Subprocess.run(path, args)
+            if output.succeeded {
+                result = .success(output.stdout)
             } else {
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                let msg = String(data: errData, encoding: .utf8) ?? "Unknown error"
-                return .failure(McpInstallError.cliFailed(msg))
+                result = .failure(McpInstallError.cliFailed(output.stderr))
             }
-        } catch {
-            return .failure(error)
+            sem.signal()
         }
+        sem.wait()
+        return result
     }
 
     // MARK: - JSON merge helpers

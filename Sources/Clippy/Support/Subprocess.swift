@@ -1,14 +1,19 @@
 import Foundation
 
 /// Run an external executable and capture its output. Used by integrations that
-/// shell out (the 1Password CLI). stdout and stderr are read concurrently so a
-/// chatty process cannot deadlock on a full pipe buffer, with a timeout watchdog.
+/// shell out (the 1Password CLI, the Claude CLI, Node.js). stdout and stderr are
+/// read concurrently so a chatty process cannot deadlock on a full pipe buffer,
+/// with a timeout watchdog.
 enum Subprocess {
     struct Output {
         let stdout: String
         let stderr: String
         let exitCode: Int32
         let launchFailed: Bool
+        /// True when the watchdog killed the process because it exceeded the timeout.
+        /// On timeout, stderr falls back to "Timed out" when the process produced none,
+        /// so callers that read stderr for error messages still get a useful string.
+        let timedOut: Bool
         var succeeded: Bool { exitCode == 0 && !launchFailed }
     }
 
@@ -23,12 +28,11 @@ enum Subprocess {
     /// have been accumulated. When truncated, the child process is terminated
     /// so both pipes drain to EOF quickly rather than blocking indefinitely.
     /// Returns the accumulated bytes with an optional truncation marker appended.
-    private static func readBounded(_ handle: FileHandle,
-                                    ceiling: Int,
-                                    truncationMarker: String,
-                                    process: Process) -> Data {
+    static func readBounded(_ handle: FileHandle,
+                            ceiling: Int,
+                            truncationMarker: String,
+                            process: Process) -> Data {
         var accumulated = Data()
-        let chunkSize = 65_536  // 64 KB read granularity
         var truncated = false
 
         while true {
@@ -47,13 +51,103 @@ enum Subprocess {
             }
             // Yield briefly so the OS can schedule the child to produce more data.
             Thread.sleep(forTimeInterval: 0.001)
-            _ = chunkSize  // suppress unused-variable warning
         }
 
         if truncated, let marker = truncationMarker.data(using: .utf8) {
             accumulated.append(marker)
         }
         return accumulated
+    }
+
+    /// Locate a named binary by checking well-known paths first, then falling
+    /// back to a login-shell `which` probe. GUI apps launched from Finder get a
+    /// stripped PATH, so the candidate list covers common Homebrew / system
+    /// prefixes; the shell fallback picks up nvm, volta, asdf, and similar
+    /// version managers.
+    static func findBinary(named name: String, candidates: [String]) -> String? {
+        for path in candidates {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        // Login-shell fallback
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-l", "-c", "which \(name)"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let path = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        } catch {}
+        return nil
+    }
+
+    /// Launch a long-lived process and return it immediately. stderr is drained
+    /// concurrently via readabilityHandler (line-buffered) so the write side of
+    /// the pipe never blocks. stdout is discarded by default; callers that need
+    /// it should attach their own pipe before calling launch.
+    ///
+    /// - Parameters:
+    ///   - executable: Absolute path to the binary.
+    ///   - arguments: Command-line arguments.
+    ///   - environment: If nil, the current process environment is inherited.
+    ///   - onStderrLine: Called on each complete stderr line as it arrives.
+    ///   - onExit: Called with the termination status when the process exits.
+    /// - Returns: The started Process (already running).
+    @discardableResult
+    static func launch(executable: String,
+                       arguments: [String],
+                       environment: [String: String]? = nil,
+                       onStderrLine: @escaping (String) -> Void,
+                       onExit: @escaping (Int32) -> Void) -> Process {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: executable)
+        proc.arguments = arguments
+        if let environment { proc.environment = environment }
+
+        proc.standardOutput = Pipe()  // discard stdout; callers attach their own if needed
+
+        let stderrPipe = Pipe()
+        proc.standardError = stderrPipe
+
+        // Line-buffer stderr: accumulate partial lines across handler calls.
+        // The readabilityHandler and terminationHandler fire on different GCD
+        // threads, so all access to stderrBuffer is serialised through a lock.
+        let bufferLock = NSLock()
+        var stderrBuffer = ""
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            guard let chunk = String(data: handle.availableData, encoding: .utf8),
+                  !chunk.isEmpty else { return }
+            bufferLock.lock()
+            stderrBuffer += chunk
+            // Deliver every complete line; hold the last partial fragment.
+            var lines = stderrBuffer.components(separatedBy: "\n")
+            stderrBuffer = lines.removeLast()
+            bufferLock.unlock()
+            for line in lines { onStderrLine(line) }
+        }
+
+        proc.terminationHandler = { p in
+            // Flush any remaining buffered stderr that arrived without a trailing newline.
+            bufferLock.lock()
+            let remaining = stderrBuffer
+            stderrBuffer = ""
+            bufferLock.unlock()
+            if !remaining.isEmpty { onStderrLine(remaining) }
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            onExit(p.terminationStatus)
+        }
+
+        try? proc.run()
+        return proc
     }
 
     static func run(_ executable: String, _ arguments: [String],
@@ -76,7 +170,7 @@ enum Subprocess {
                 } catch {
                     continuation.resume(returning: Output(
                         stdout: "", stderr: error.localizedDescription,
-                        exitCode: -1, launchFailed: true))
+                        exitCode: -1, launchFailed: true, timedOut: false))
                     return
                 }
 
@@ -114,11 +208,16 @@ enum Subprocess {
                 process.waitUntilExit()
                 watchdog.cancel()
 
+                let didTimeOut = timedOut.isSet
+                let rawStderr = String(decoding: errData, as: UTF8.self)
                 continuation.resume(returning: Output(
                     stdout: String(decoding: outData, as: UTF8.self),
-                    stderr: timedOut.isSet ? "Timed out" : String(decoding: errData, as: UTF8.self),
+                    // Keep "Timed out" fallback when the process produced no stderr,
+                    // so callers that surface stderr in error messages stay useful.
+                    stderr: didTimeOut && rawStderr.isEmpty ? "Timed out" : rawStderr,
                     exitCode: process.terminationStatus,
-                    launchFailed: false))
+                    launchFailed: false,
+                    timedOut: didTimeOut))
             }
         }
     }

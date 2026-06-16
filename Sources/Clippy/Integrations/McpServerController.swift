@@ -48,36 +48,14 @@ final class McpServerController: ObservableObject {
     // MARK: - Node binary lookup
 
     /// Locate the node binary. GUI apps launched from Finder get a stripped PATH,
-    /// so we check known Homebrew / system paths before falling back to a login shell.
+    /// so we check known Homebrew / system paths before falling back to a login shell
+    /// (which picks up nvm, volta, asdf, etc.).
     static func findNodeBinary() -> String? {
-        let candidates = [
+        Subprocess.findBinary(named: "node", candidates: [
             "/opt/homebrew/bin/node",
             "/usr/local/bin/node",
             "/usr/bin/node",
-        ]
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        // Login-shell fallback: picks up nvm, volta, asdf, etc.
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-l", "-c", "which node"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let path = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        } catch {}
-        return nil
+        ])
     }
 
     // MARK: - Script path resolution
@@ -181,67 +159,78 @@ final class McpServerController: ObservableObject {
 
         let dbPath = ClipDatabase.shared.databaseURL.path
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: nodePath)
-        // node:sqlite is unflagged since Node 22.13 but still emits an
-        // ExperimentalWarning; silence it so a clean stderr means a clean start.
-        proc.arguments = ["--disable-warning=ExperimentalWarning", scriptPath]
-
         var env = ProcessInfo.processInfo.environment
         env["CLIPPY_MCP_PORT"] = "\(port)"
         env["CLIPPY_DB_PATH"] = dbPath
-        proc.environment = env
 
-        let stderrPipe = Pipe()
-        proc.standardOutput = Pipe()
-        proc.standardError = stderrPipe
+        // Collect stderr lines for the failure diagnostic; the health poll snapshot
+        // closure captures this array and reads it at failure time. stderr arrives on
+        // launch's background drain thread while the poll reads from a URLSession
+        // callback thread, so guard both sides with a lock.
+        let stderrLock = NSLock()
+        var stderrLines: [String] = []
 
-        proc.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async {
-                // Only flip to stopped if we were the one running (not already restarted)
-                if let self, case .running = self.status {
-                    self.status = .stopped
+        // node:sqlite is unflagged since Node 22.13 but still emits an
+        // ExperimentalWarning; silence it so a clean stderr means a clean start.
+        let proc = Subprocess.launch(
+            executable: nodePath,
+            arguments: ["--disable-warning=ExperimentalWarning", scriptPath],
+            environment: env,
+            onStderrLine: { line in
+                stderrLock.lock()
+                stderrLines.append(line)
+                stderrLock.unlock()
+            },
+            onExit: { [weak self] _ in
+                DispatchQueue.main.async {
+                    // Only flip to stopped if we were the one running (not already restarted)
+                    if let self, case .running = self.status {
+                        self.status = .stopped
+                    }
                 }
             }
-        }
-
-        do {
-            try proc.run()
-        } catch {
-            let msg = "Failed to launch node: \(error.localizedDescription)"
-            ClippyLog.error("MCP launch error: \(msg)", category: ClippyLog.mcp)
-            DispatchQueue.main.async { [weak self] in
-                self?.status = .failed(msg)
-            }
-            return
-        }
+        )
 
         self.process = proc
 
         // Poll /health until the server is up (max ~2.5s with 5 retries).
-        pollHealth(port: port, retriesLeft: 5, stderrPipe: stderrPipe)
+        // The closure captures stderrLines by reference so the failure diagnostic
+        // sees all lines that arrived by the time we give up.
+        pollHealth(port: port, retriesLeft: 5, stderrSnapshot: {
+            stderrLock.lock()
+            defer { stderrLock.unlock() }
+            return stderrLines
+        })
     }
 
-    private func pollHealth(port: Int, retriesLeft: Int, stderrPipe: Pipe) {
+    private func pollHealth(port: Int, retriesLeft: Int, stderrSnapshot: @escaping () -> [String]) {
         let url = URL(string: "http://127.0.0.1:\(port)/health")!
         let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
             guard let self else { return }
             let ok = (response as? HTTPURLResponse)?.statusCode == 200
             if ok {
+                // Capture any startup warnings that arrived before /health responded.
+                // Logging here preserves diagnostics without delaying the .running transition.
+                let startupStderr = stderrSnapshot()
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !startupStderr.isEmpty {
+                    ClippyLog.info("MCP server startup stderr: \(startupStderr)", category: ClippyLog.mcp)
+                }
                 ClippyLog.info("MCP server running on port \(port)", category: ClippyLog.mcp)
                 DispatchQueue.main.async { self.status = .running(port: port) }
             } else if retriesLeft > 0 {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                    self.pollHealth(port: port, retriesLeft: retriesLeft - 1, stderrPipe: stderrPipe)
+                    self.pollHealth(port: port, retriesLeft: retriesLeft - 1, stderrSnapshot: stderrSnapshot)
                 }
             } else {
-                // Read stderr for a diagnostic message
-                let errData = stderrPipe.fileHandleForReading.availableData
-                let errMsg = String(data: errData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let detail = errMsg.isEmpty ? "Server did not respond to /health after launch." : errMsg
-                ClippyLog.error("MCP server failed to start: \(detail)", category: ClippyLog.mcp)
-                DispatchQueue.main.async { self.status = .failed(detail) }
+                // Snapshot the stderr lines collected so far for the diagnostic message.
+                let detail = stderrSnapshot()
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let msg = detail.isEmpty ? "Server did not respond to /health after launch." : detail
+                ClippyLog.error("MCP server failed to start: \(msg)", category: ClippyLog.mcp)
+                DispatchQueue.main.async { self.status = .failed(msg) }
             }
         }
         task.resume()
@@ -257,9 +246,25 @@ final class McpServerController: ObservableObject {
     }
 
     func restart() {
+        // Capture the live process reference before stop() nils it out.
+        let dying = process
         stop()
-        // Small delay so the port is released before we try to bind again.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        DispatchQueue.global().async { [weak self] in
+            // Wait for the old process to actually exit so the OS reclaims the
+            // bound port before _start() tries to bind again. A fixed delay is
+            // not reliable because SIGTERM delivery and teardown time vary.
+            // waitUntilExit() blocks the background thread (never the main thread).
+            // We bound the wait to 2s so a stuck child cannot stall the restart
+            // indefinitely; if it times out we proceed and let _start() handle
+            // any portInUse outcome normally.
+            if let dying {
+                let exited = DispatchSemaphore(value: 0)
+                DispatchQueue.global().async {
+                    dying.waitUntilExit()
+                    exited.signal()
+                }
+                _ = exited.wait(timeout: .now() + 2.0)
+            }
             self?._start()
         }
     }

@@ -99,6 +99,68 @@ if (useHttp) {
 
   const sessions = new Map<string, StreamableHTTPServerTransport>();
 
+  // ---------------------------------------------------------------------------
+  // Idle-session reaper: clients that crash or drop mid-request never fire
+  // onclose, so the session entry would otherwise leak forever.  We track last
+  // activity per session and sweep every minute, closing anything idle beyond
+  // SESSION_TTL_MS.  10 minutes is chosen because it is long enough to cover
+  // any legitimate inter-request pause (e.g. a user thinking, a slow network
+  // reconnect) while still bounding worst-case map growth to ~10 entries per
+  // minute of sustained connection churn.
+  // ---------------------------------------------------------------------------
+
+  const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const sessionActivity = new Map<string, number>(); // sessionId -> Date.now()
+
+  // Sessions whose SSE GET stream is currently open.  The reaper must never
+  // touch these regardless of lastSeen: the client is alive; it just has not
+  // sent a POST for a while.  The set is populated just before handleRequest
+  // for a GET and cleared by the "close" event on the ServerResponse, which
+  // Node.js fires whenever the underlying socket is destroyed (client drop,
+  // graceful disconnect, or server-initiated close).
+  const openSseStreams = new Set<string>();
+
+  function touchSession(sessionId: string): void {
+    sessionActivity.set(sessionId, Date.now());
+  }
+
+  async function reapIdleSessions(): Promise<void> {
+    const cutoff = Date.now() - SESSION_TTL_MS;
+    for (const [id, lastSeen] of sessionActivity) {
+      // Never reap a session whose SSE stream is currently open: the client
+      // is connected and waiting for server notifications.  TTL only applies
+      // once the stream has closed and the session is truly idle.
+      if (openSseStreams.has(id)) {
+        continue;
+      }
+      if (lastSeen < cutoff) {
+        const transport = sessions.get(id);
+        sessions.delete(id);
+        sessionActivity.delete(id);
+        if (transport !== undefined) {
+          // close() ends all active SSE streams and frees internal state.
+          transport.close().catch((err: unknown) => {
+            console.error(
+              `clippy-mcp: error closing idle session ${id}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          });
+        }
+      }
+    }
+  }
+
+  // unref() so the timer does not keep the process alive when nothing else is
+  // running (e.g. during a graceful shutdown where the HTTP server has closed).
+  const reaperTimer = setInterval(() => {
+    reapIdleSessions();
+  }, 60_000).unref();
+
+  // Clear the timer when the HTTP server closes so there are no dangling
+  // handles on explicit shutdown.
+  // (Node fires the "close" event after all connections drain.)
+
   /** Create a fresh Server + transport pair for a new MCP session. */
   function createSession(): StreamableHTTPServerTransport {
     const server = new Server(
@@ -111,16 +173,22 @@ if (useHttp) {
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId) => {
         sessions.set(sessionId, transport);
+        touchSession(sessionId); // start the idle clock
       },
       onsessionclosed: (sessionId) => {
         sessions.delete(sessionId);
+        sessionActivity.delete(sessionId);
       },
     });
 
-    // Clean up the session map when the transport itself closes.
+    // Clean up the session map when the transport itself closes (covers the
+    // case where the SDK closes the transport directly, e.g. via DELETE).
     transport.onclose = () => {
       const id = transport.sessionId;
-      if (id !== undefined) sessions.delete(id);
+      if (id !== undefined) {
+        sessions.delete(id);
+        sessionActivity.delete(id);
+      }
     };
 
     server.connect(transport).catch((err: unknown) => {
@@ -176,8 +244,9 @@ if (useHttp) {
           let transport: StreamableHTTPServerTransport;
 
           if (sessionId && sessions.has(sessionId)) {
-            // Existing session.
+            // Existing session — refresh its idle clock.
             transport = sessions.get(sessionId)!;
+            touchSession(sessionId);
           } else if (sessionId) {
             // Unknown session ID — reject per spec.
             res.writeHead(404, { "Content-Type": "application/json" });
@@ -199,17 +268,32 @@ if (useHttp) {
             res.end(JSON.stringify({ error: "Missing or invalid mcp-session-id" }));
             return;
           }
+          // Mark this session as having a live SSE stream so the reaper skips
+          // it for as long as the connection is open.  The "close" event on
+          // ServerResponse fires when the underlying socket is destroyed
+          // (client disconnect, server push of FIN, or process shutdown).
+          // At that point we remove the guard and reset lastSeen so the
+          // normal TTL clock restarts from now.
+          openSseStreams.add(sessionId);
+          res.once("close", () => {
+            openSseStreams.delete(sessionId);
+            // Restart the idle clock from the moment the stream closes so a
+            // session that reconnects soon is not immediately reaped.
+            touchSession(sessionId);
+          });
+          touchSession(sessionId);
           await sessions.get(sessionId)!.handleRequest(req, res);
           return;
         }
 
         if (req.method === "DELETE") {
-          // DELETE tears down a session.
+          // DELETE tears down a session explicitly requested by the client.
           if (!sessionId || !sessions.has(sessionId)) {
             res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Session not found" }));
             return;
           }
+          touchSession(sessionId);
           const body = await readBody(req);
           await sessions.get(sessionId)!.handleRequest(req, res, body);
           return;
@@ -230,6 +314,11 @@ if (useHttp) {
     console.error(
       `clippy-mcp HTTP listening on http://127.0.0.1:${parsedPort}/mcp (db: ${dbPath})`,
     );
+  });
+
+  // Stop the reaper when the HTTP server shuts down so no handles linger.
+  httpServer.on("close", () => {
+    clearInterval(reaperTimer);
   });
 } else {
   // -------------------------------------------------------------------------
