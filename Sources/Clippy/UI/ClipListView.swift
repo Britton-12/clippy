@@ -116,8 +116,8 @@ struct ClipListView: View {
                 .strokeBorder(tokens.cardBorder, lineWidth: 1)
         )
         .tint(tokens.accent)
-        .onChange(of: store.clips) { _, _ in selectedIndex = 0 }
-        .onChange(of: selection) { _, _ in selectedIndex = 0 }
+        .onChange(of: store.clips) { _, _ in selectedIndex = 0; selectedClipIDs = [] }
+        .onChange(of: selection) { _, _ in selectedIndex = 0; selectedClipIDs = [] }
         // AI action sheet, shown when a context-menu AI action produces a proposal.
         .sheet(isPresented: Binding(
             get: { aiRunner.isPresenting },
@@ -260,7 +260,18 @@ struct ClipListView: View {
                     pasteSelected(shiftHeld: press.modifiers.contains(.shift))
                     return .handled
                 }
-                .onKeyPress(.escape) { onClose(); return .handled }
+                .onKeyPress(keys: ["a"]) { press in
+                    guard press.modifiers.contains(.command) else { return .ignored }
+                    selectedClipIDs = Set(visibleClips.compactMap { $0.id })
+                    return .handled
+                }
+                // Esc clears a multi-selection first; only when there is none does
+                // it fall through to closing the panel (the existing behavior).
+                .onKeyPress(.escape) {
+                    if !selectedClipIDs.isEmpty { selectedClipIDs = []; return .handled }
+                    onClose()
+                    return .handled
+                }
                 .onKeyPress(keys: ["e"]) { press in
                     guard press.modifiers.contains(.command),
                           let clip = selectedClip,
@@ -638,6 +649,13 @@ struct ClipListView: View {
 
     private var footer: some View {
         HStack(spacing: 14) {
+            if selectedClipIDs.count >= 2 {
+                Text("\(selectedClipIDs.count) selected")
+                    .font(PanelTypography.micro(settings))
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(tokens.accent.opacity(0.18), in: Capsule())
+                    .foregroundStyle(tokens.accent)
+            }
             keyHint("\u{21A9}", settings.pastePlainTextByDefault ? "paste plain" : "paste")
             keyHint("\u{21E7}\u{21A9}", settings.pastePlainTextByDefault ? "formatted" : "plain")
             keyHint("\u{2318}P", "pin")
