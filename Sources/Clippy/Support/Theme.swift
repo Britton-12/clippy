@@ -35,6 +35,8 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 // MARK: - Accent color
 
 enum AccentTheme: String, CaseIterable, Identifiable {
+    // clippyAmber is listed first so it appears at the top of pickers.
+    case clippyAmber
     case system
     case blue
     case purple
@@ -50,6 +52,7 @@ enum AccentTheme: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .clippyAmber: return "Clippy Amber"
         case .system: return "System"
         case .blue: return "Blue"
         case .purple: return "Purple"
@@ -65,6 +68,7 @@ enum AccentTheme: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
+        case .clippyAmber: return Color(red: 0xE0 / 255.0, green: 0xA2 / 255.0, blue: 0x3C / 255.0)
         case .system: return Color(nsColor: .controlAccentColor)
         case .blue: return Color(nsColor: .systemBlue)
         case .purple: return Color(nsColor: .systemPurple)

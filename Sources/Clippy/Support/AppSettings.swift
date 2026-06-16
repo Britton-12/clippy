@@ -479,7 +479,7 @@ final class AppSettings: ObservableObject {
             Keys.pastePlainTextByDefault: false,
             Keys.ignoredBundleIDs: [String](),
             Keys.appearanceMode: AppearanceMode.system.rawValue,
-            Keys.accentTheme: AccentTheme.system.rawValue,
+            Keys.accentTheme: AccentTheme.clippyAmber.rawValue,
             // Solid is the default: fully opaque, full-contrast, no glass effect.
             Keys.panelMaterial: PanelMaterialStyle.opaque.rawValue,
             Keys.cardColorMode: CardColorMode.byApp.rawValue,
@@ -546,7 +546,7 @@ final class AppSettings: ObservableObject {
         pastePlainTextByDefault = defaults.bool(forKey: Keys.pastePlainTextByDefault)
         ignoredBundleIDs = defaults.stringArray(forKey: Keys.ignoredBundleIDs) ?? []
         appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearanceMode) ?? "") ?? .system
-        accentTheme = AccentTheme(rawValue: defaults.string(forKey: Keys.accentTheme) ?? "") ?? .system
+        accentTheme = AccentTheme(rawValue: defaults.string(forKey: Keys.accentTheme) ?? "") ?? .clippyAmber
         panelMaterial = PanelMaterialStyle(rawValue: defaults.string(forKey: Keys.panelMaterial) ?? "") ?? .regular
         cardColorMode = CardColorMode(rawValue: defaults.string(forKey: Keys.cardColorMode) ?? "") ?? .byApp
         showAppIcons = defaults.bool(forKey: Keys.showAppIcons)
