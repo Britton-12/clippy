@@ -8,6 +8,7 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.9.3"),
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.0"),
     ],
     targets: [
         .executableTarget(
@@ -16,6 +17,7 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
             // AppKit delegates and Carbon callbacks are simpler under the v5
             // concurrency model; revisit when the whole app moves to Swift 6 mode.

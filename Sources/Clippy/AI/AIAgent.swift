@@ -19,6 +19,10 @@ protocol AIAgentProvider: AIProvider {
         tools: [AITool],
         options: AICompletionOptions
     ) async throws -> AIAgentTurn
+
+    /// Streaming variant: yields text deltas live, then any tool calls, then `.done`.
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error>
 }
 
 // MARK: - Turn result
@@ -115,6 +119,64 @@ enum AIAgent {
         return try await provider.complete(messages, options: options)
     }
 
+    /// Streaming variant of the agent loop. Yields text deltas live as the model
+    /// produces them, brackets each tool execution with `.toolStarted`/`.toolFinished`,
+    /// and finishes when the model returns plain text (no tool calls) or `maxRounds`
+    /// is exhausted (in which case it appends a final non-streaming summary turn).
+    static func streamWithTools(
+        messages initialMessages: [AIMessage],
+        provider: AIAgentProvider,
+        tools: [AITool],
+        options: AICompletionOptions = AICompletionOptions()
+    ) -> AsyncThrowingStream<AIAgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var messages = initialMessages
+                let maxRounds = 8
+                var round = 0
+                do {
+                    while round < maxRounds {
+                        round += 1
+                        var collectedCalls: [AIToolCall] = []
+                        for try await event in provider.streamWithTools(messages, tools: tools, options: options) {
+                            switch event {
+                            case .textDelta(let t): continuation.yield(.textDelta(t))
+                            case .toolCalls(let calls): collectedCalls = calls
+                            case .done: break
+                            }
+                        }
+                        if collectedCalls.isEmpty {
+                            continuation.finish(); return
+                        }
+                        messages.append(AIMessage(role: .assistant,
+                                                  content: encodeToolCallsForHistory(collectedCalls)))
+                        for call in collectedCalls {
+                            continuation.yield(.toolStarted(call.toolName))
+                            let result: String
+                            if let tool = tools.first(where: { $0.name == call.toolName }) {
+                                do { result = try await tool.execute(args: call.arguments) }
+                                catch { result = "Tool error: \(error.localizedDescription)" }
+                            } else {
+                                result = "Error: unknown tool \"\(call.toolName)\"."
+                            }
+                            messages.append(AIMessage(role: .user,
+                                content: AIToolResultSentinel.encode(id: call.id, toolName: call.toolName, result: result)))
+                            continuation.yield(.toolFinished(call.toolName))
+                        }
+                    }
+                    // Round cap: one final non-streaming summary turn.
+                    messages.append(AIMessage(role: .user, content: "Summarise what you accomplished for the user."))
+                    let summary = try await provider.complete(messages, options: options)
+                    continuation.yield(.textDelta(summary))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: - Internal helpers
 
     /// Encode tool calls as a JSON string stored in the assistant message content
@@ -207,6 +269,47 @@ struct OpenAIAgentProvider: AIAgentProvider {
         return try Self.parseTurn(data)
     }
 
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let body: [String: Any] = [
+            "model": config.model,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "temperature": options.temperature,
+            "max_tokens": options.maxTokens,
+            "stream": true,
+        ]
+        let lines = AIStreamingHTTP.postLines(
+            url: "\(config.baseURL)/v1/chat/completions",
+            headers: ["Authorization": "Bearer \(config.apiKey)"],
+            body: body)
+        return Self.eventStream(from: lines, accumulator: OpenAIStreamAccumulator())
+    }
+
+    /// Shared driver: feed lines through an OpenAI accumulator, emit text deltas
+    /// live, then emit tool calls (if any) and `.done` at end. Reused by Azure.
+    static func eventStream(from lines: AsyncThrowingStream<String, Error>,
+                            accumulator: OpenAIStreamAccumulator)
+        -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = accumulator
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: Wire helpers
 
     static func wireMessages(_ messages: [AIMessage]) -> [[String: Any]] {
@@ -297,6 +400,39 @@ struct AnthropicAgentProvider: AIAgentProvider {
             body: body
         )
         return try Self.parseTurn(data)
+    }
+
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
+        var body: [String: Any] = [
+            "model": config.model,
+            "max_tokens": options.maxTokens,
+            "temperature": options.temperature,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.anthropicToolSpec),
+            "stream": true,
+        ]
+        if !system.isEmpty { body["system"] = system }
+        let lines = AIStreamingHTTP.postLines(
+            url: "\(config.baseURL)/v1/messages",
+            headers: ["x-api-key": config.apiKey, "anthropic-version": "2023-06-01"],
+            body: body)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = AnthropicStreamAccumulator()
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     // MARK: Wire helpers
@@ -402,6 +538,33 @@ struct OllamaAgentProvider: AIAgentProvider {
         return try Self.parseTurn(data)
     }
 
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let body: [String: Any] = [
+            "model": config.model,
+            "messages": Self.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "stream": true,
+            "options": ["temperature": options.temperature],
+        ]
+        let lines = AIStreamingHTTP.postLines(url: "\(config.baseURL)/api/chat", headers: [:], body: body)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                var acc = OllamaStreamAccumulator()
+                do {
+                    for try await line in lines {
+                        if let text = acc.consume(line: line) { continuation.yield(.textDelta(text)) }
+                    }
+                    let calls = acc.finishToolCalls()
+                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.done)
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     static func wireMessages(_ messages: [AIMessage]) -> [[String: Any]] {
         messages.map { msg in
             if let (_, _, result) = AIToolResultSentinel.decode(msg.content) {
@@ -481,6 +644,20 @@ struct AzureFoundryAgentProvider: AIAgentProvider {
         // Azure returns the same shape as OpenAI.
         return try OpenAIAgentProvider.parseTurn(data)
     }
+
+    func streamWithTools(_ messages: [AIMessage], tools: [AITool],
+                         options: AICompletionOptions) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let url = "\(config.baseURL)/openai/deployments/\(config.model)/chat/completions?api-version=\(config.apiVersion)"
+        let body: [String: Any] = [
+            "messages": OpenAIAgentProvider.wireMessages(messages),
+            "tools": tools.map(\.openAIFunctionSpec),
+            "temperature": options.temperature,
+            "max_tokens": options.maxTokens,
+            "stream": true,
+        ]
+        let lines = AIStreamingHTTP.postLines(url: url, headers: ["api-key": config.apiKey], body: body)
+        return OpenAIAgentProvider.eventStream(from: lines, accumulator: OpenAIStreamAccumulator())
+    }
 }
 
 // MARK: - Agent provider factory
@@ -494,4 +671,136 @@ enum AIAgentProviderFactory {
         case .azureFoundry: return AzureFoundryAgentProvider(config: config)
         }
     }
+}
+
+// MARK: - Streaming accumulators
+//
+// Pure, stateful parsers that turn raw stream lines into text deltas + tool
+// calls. They have no networking and no wiring yet; later tasks feed them.
+
+/// Accumulates OpenAI/Azure chat-completions SSE deltas into events.
+/// Pure: feed each raw SSE line; text is returned immediately, tool calls are
+/// assembled from fragments and read out at the end via `finishToolCalls()`.
+struct OpenAIStreamAccumulator {
+    private var toolFragments: [Int: (id: String, name: String, args: String)] = [:]
+    private var sawToolCalls = false
+
+    mutating func consume(line: String) -> String? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        if payload == "[DONE]" { return nil }
+        guard let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let delta = choices.first?["delta"] as? [String: Any] else { return nil }
+        if let calls = delta["tool_calls"] as? [[String: Any]] {
+            sawToolCalls = true
+            for tc in calls {
+                let idx = tc["index"] as? Int ?? 0
+                var entry = toolFragments[idx] ?? (id: "", name: "", args: "")
+                if let id = tc["id"] as? String { entry.id = id }
+                if let fn = tc["function"] as? [String: Any] {
+                    if let n = fn["name"] as? String { entry.name = n }
+                    if let a = fn["arguments"] as? String { entry.args += a }
+                }
+                toolFragments[idx] = entry
+            }
+        }
+        if let content = delta["content"] as? String, !content.isEmpty { return content }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] {
+        guard sawToolCalls else { return [] }
+        return toolFragments.sorted { $0.key < $1.key }.compactMap { _, frag in
+            guard !frag.name.isEmpty else { return nil }
+            let args = (frag.args.data(using: .utf8)
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+            return AIToolCall(id: frag.id.isEmpty ? "openai-\(frag.name)" : frag.id,
+                              toolName: frag.name, arguments: args)
+        }
+    }
+}
+
+/// Accumulates Anthropic Messages SSE events into text deltas + tool calls.
+struct AnthropicStreamAccumulator {
+    private var blocks: [Int: (type: String, id: String, name: String, json: String)] = [:]
+    private var stopReason = ""
+
+    mutating func consume(line: String) -> String? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = root["type"] as? String else { return nil }
+        switch type {
+        case "content_block_start":
+            let idx = root["index"] as? Int ?? 0
+            if let block = root["content_block"] as? [String: Any] {
+                let t = block["type"] as? String ?? ""
+                blocks[idx] = (type: t, id: block["id"] as? String ?? "",
+                               name: block["name"] as? String ?? "", json: "")
+            }
+        case "content_block_delta":
+            let idx = root["index"] as? Int ?? 0
+            if let delta = root["delta"] as? [String: Any] {
+                if let t = delta["text"] as? String, (delta["type"] as? String) == "text_delta" {
+                    return t
+                }
+                if let pj = delta["partial_json"] as? String,
+                   (delta["type"] as? String) == "input_json_delta" {
+                    blocks[idx]?.json += pj
+                }
+            }
+        case "message_delta":
+            if let d = root["delta"] as? [String: Any], let sr = d["stop_reason"] as? String {
+                stopReason = sr
+            }
+        default:
+            break
+        }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] {
+        guard stopReason == "tool_use" else { return [] }
+        return blocks.sorted { $0.key < $1.key }.compactMap { _, b in
+            guard b.type == "tool_use" else { return nil }
+            let args = (b.json.data(using: .utf8)
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+            return AIToolCall(id: b.id, toolName: b.name, arguments: args)
+        }
+    }
+}
+
+/// Accumulates Ollama /api/chat JSONL lines into text deltas + tool calls.
+struct OllamaStreamAccumulator {
+    private var pendingToolCalls: [AIToolCall] = []
+
+    mutating func consume(line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = root["message"] as? [String: Any] else { return nil }
+        if let calls = message["tool_calls"] as? [[String: Any]], !calls.isEmpty {
+            var idx = 0
+            pendingToolCalls = calls.compactMap { tc in
+                guard let fn = tc["function"] as? [String: Any],
+                      let name = fn["name"] as? String else { return nil }
+                let args: [String: Any]
+                if let d = fn["arguments"] as? [String: Any] { args = d }
+                else if let s = fn["arguments"] as? String,
+                        let dd = s.data(using: .utf8),
+                        let d = try? JSONSerialization.jsonObject(with: dd) as? [String: Any] { args = d }
+                else { args = [:] }
+                idx += 1
+                return AIToolCall(id: "ollama-\(idx)", toolName: name, arguments: args)
+            }
+        }
+        if let content = message["content"] as? String, !content.isEmpty { return content }
+        return nil
+    }
+
+    func finishToolCalls() -> [AIToolCall] { pendingToolCalls }
 }
