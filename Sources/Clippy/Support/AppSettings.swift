@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -79,6 +80,12 @@ enum KeystrokeSpeed: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    // Explicit publisher so the @AppDefault subscript can always resolve
+    // instance.objectWillChange as ObservableObjectPublisher. With no
+    // @Published properties remaining the compiler's synthesized publisher
+    // type is implementation-defined; declaring it explicitly is safer.
+    let objectWillChange = ObservableObjectPublisher()
+
     private enum Keys {
         static let positionMode = "positionMode"
         static let panelWidth = "panelWidth"
@@ -157,215 +164,215 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    @Published var positionMode: PanelPositionMode {
-        didSet { defaults.set(positionMode.rawValue, forKey: Keys.positionMode) }
-    }
-    @Published var panelWidth: Double {
-        didSet { defaults.set(panelWidth, forKey: Keys.panelWidth) }
-    }
-    @Published var panelHeight: Double {
-        didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
-    }
-    @Published var rememberPanelSize: Bool {
-        didSet { defaults.set(rememberPanelSize, forKey: Keys.rememberPanelSize) }
-    }
+    // MARK: - Converted properties (@AppDefault)
+    //
+    // Each line replaces a @Published var + didSet { defaults.set(...) } block.
+    // Key strings are passed as Keys.x so the byte-identical string constant
+    // is preserved. Defaults match the values registered in init exactly.
+    //
+    // @AppDefault uses UserDefaults.standard directly. No test constructs
+    // AppSettings with a custom UserDefaults (all tests use .shared), so
+    // this does not break any test seam. See AppDefault.swift for details.
+
+    @AppDefault(Keys.positionMode, default: PanelPositionMode.caret)
+    var positionMode: PanelPositionMode
+
+    @AppDefault(Keys.panelWidth, default: 640.0)
+    var panelWidth: Double
+
+    @AppDefault(Keys.panelHeight, default: 480.0)
+    var panelHeight: Double
+
+    @AppDefault(Keys.rememberPanelSize, default: true)
+    var rememberPanelSize: Bool
+
+    // pollingIntervalMs: kept @Published because ClipboardMonitor subscribes
+    // via $pollingIntervalMs to react live to polling-interval changes.
     @Published var pollingIntervalMs: Double {
         didSet { defaults.set(pollingIntervalMs, forKey: Keys.pollingIntervalMs) }
     }
-    @Published var maxHistoryItems: Int {
-        didSet { defaults.set(maxHistoryItems, forKey: Keys.maxHistoryItems) }
-    }
-    @Published var movePastedItemToTop: Bool {
-        didSet { defaults.set(movePastedItemToTop, forKey: Keys.movePastedItemToTop) }
-    }
-    @Published var pastePlainTextByDefault: Bool {
-        didSet { defaults.set(pastePlainTextByDefault, forKey: Keys.pastePlainTextByDefault) }
-    }
-    @Published var ignoredBundleIDs: [String] {
-        didSet { defaults.set(ignoredBundleIDs, forKey: Keys.ignoredBundleIDs) }
-    }
-    @Published var appearanceMode: AppearanceMode {
-        didSet { defaults.set(appearanceMode.rawValue, forKey: Keys.appearanceMode) }
-    }
-    @Published var accentTheme: AccentTheme {
-        didSet { defaults.set(accentTheme.rawValue, forKey: Keys.accentTheme) }
-    }
-    @Published var panelMaterial: PanelMaterialStyle {
-        didSet { defaults.set(panelMaterial.rawValue, forKey: Keys.panelMaterial) }
-    }
-    @Published var cardColorMode: CardColorMode {
-        didSet { defaults.set(cardColorMode.rawValue, forKey: Keys.cardColorMode) }
-    }
-    @Published var showAppIcons: Bool {
-        didSet { defaults.set(showAppIcons, forKey: Keys.showAppIcons) }
-    }
-    @Published var showSectionHeaders: Bool {
-        didSet { defaults.set(showSectionHeaders, forKey: Keys.showSectionHeaders) }
-    }
-    @Published var captureImages: Bool {
-        didSet { defaults.set(captureImages, forKey: Keys.captureImages) }
-    }
-    @Published var maxImageSizeMB: Int {
-        didSet { defaults.set(maxImageSizeMB, forKey: Keys.maxImageSizeMB) }
-    }
+
+    @AppDefault(Keys.maxHistoryItems, default: 500)
+    var maxHistoryItems: Int
+
+    @AppDefault(Keys.movePastedItemToTop, default: false)
+    var movePastedItemToTop: Bool
+
+    @AppDefault(Keys.pastePlainTextByDefault, default: false)
+    var pastePlainTextByDefault: Bool
+
+    @AppDefault(Keys.ignoredBundleIDs, default: [String]())
+    var ignoredBundleIDs: [String]
+
+    @AppDefault(Keys.appearanceMode, default: AppearanceMode.system)
+    var appearanceMode: AppearanceMode
+
+    @AppDefault(Keys.accentTheme, default: AccentTheme.clippyAmber)
+    var accentTheme: AccentTheme
+
+    @AppDefault(Keys.panelMaterial, default: PanelMaterialStyle.opaque)
+    var panelMaterial: PanelMaterialStyle
+
+    @AppDefault(Keys.cardColorMode, default: CardColorMode.byApp)
+    var cardColorMode: CardColorMode
+
+    @AppDefault(Keys.showAppIcons, default: true)
+    var showAppIcons: Bool
+
+    @AppDefault(Keys.showSectionHeaders, default: true)
+    var showSectionHeaders: Bool
+
+    @AppDefault(Keys.captureImages, default: true)
+    var captureImages: Bool
+
+    @AppDefault(Keys.maxImageSizeMB, default: 20)
+    var maxImageSizeMB: Int
+
     /// Whether to play a sound after each successful clip save. Defaults to
     /// false so existing users hear no change until they opt in.
-    @Published var captureSoundEnabled: Bool {
-        didSet { defaults.set(captureSoundEnabled, forKey: Keys.captureSoundEnabled) }
-    }
-    /// Stable identifier of the chosen capture sound, addressing any installed
-    /// system sound (classic alert or modern UI sound). See SoundCatalog.
-    @Published var captureSoundID: String {
-        didSet { defaults.set(captureSoundID, forKey: Keys.captureSoundID) }
-    }
+    @AppDefault(Keys.captureSoundEnabled, default: false)
+    var captureSoundEnabled: Bool
+
     /// Volume in 0-100 integer percent, matching the slider range.
-    @Published var captureSoundVolume: Int {
-        didSet { defaults.set(captureSoundVolume, forKey: Keys.captureSoundVolume) }
-    }
+    @AppDefault(Keys.captureSoundVolume, default: 50)
+    var captureSoundVolume: Int
 
     // MARK: - New appearance knobs
 
     /// Card rendering style: filled (opaque face), bordered (outline only), or plain.
-    @Published var cardStyle: CardStyle {
-        didSet { defaults.set(cardStyle.rawValue, forKey: Keys.cardStyle) }
-    }
+    @AppDefault(Keys.cardStyle, default: CardStyle.filled)
+    var cardStyle: CardStyle
+
     /// Identity-color tint strength on cards, 0-20 percent. 0 = no tint.
-    @Published var cardTintStrength: Int {
-        didSet { defaults.set(cardTintStrength, forKey: Keys.cardTintStrength) }
-    }
+    @AppDefault(Keys.cardTintStrength, default: 8)
+    var cardTintStrength: Int
+
     /// When true, card title and preview text use .primary instead of .secondary /
     /// subdued colors, improving contrast on both light and dark backgrounds.
-    @Published var highContrastCardText: Bool {
-        didSet { defaults.set(highContrastCardText, forKey: Keys.highContrastCardText) }
-    }
+    @AppDefault(Keys.highContrastCardText, default: false)
+    var highContrastCardText: Bool
+
     /// Panel UI font family. .systemDefault uses the system font.
-    @Published var fontFamily: PanelFontFamily {
-        didSet { defaults.set(fontFamily.rawValue, forKey: Keys.fontFamily) }
-    }
-    /// Base font size in points (11-16). The typography helper scales all roles
-    /// from this value so the relative hierarchy is always preserved.
-    @Published var fontSizeBase: Int {
-        didSet { defaults.set(fontSizeBase, forKey: Keys.fontSizeBase) }
-    }
+    @AppDefault(Keys.fontFamily, default: PanelFontFamily.systemDefault)
+    var fontFamily: PanelFontFamily
 
     // MARK: - Theme
 
     /// Named theme preset. Drives the whole token table; see Theme.tokens().
-    @Published var themePreset: ThemePreset {
-        didSet { defaults.set(themePreset.rawValue, forKey: Keys.themePreset) }
-    }
-    /// Panel translucency, 0.30 (very see-through) to 1.0 (fully solid). At 1.0
-    /// the panel is opaque with no blur, which is the fix for the washed-out
-    /// look; below 1.0 a blur shows the desktop through the tinted background.
-    @Published var panelOpacity: Double {
-        didSet { defaults.set(panelOpacity, forKey: Keys.panelOpacity) }
-    }
+    @AppDefault(Keys.themePreset, default: ThemePreset.cleanLight)
+    var themePreset: ThemePreset
+
     /// Whether the custom palette is a dark theme (affects scrollbar/appearance).
-    @Published var customIsDark: Bool {
-        didSet { defaults.set(customIsDark, forKey: Keys.customIsDark) }
-    }
-    @Published var customPanelHex: String { didSet { defaults.set(customPanelHex, forKey: Keys.customPanelHex) } }
-    @Published var customScrollBgHex: String { didSet { defaults.set(customScrollBgHex, forKey: Keys.customScrollBgHex) } }
-    @Published var customCardSurfaceHex: String { didSet { defaults.set(customCardSurfaceHex, forKey: Keys.customCardSurfaceHex) } }
-    @Published var customCardBorderHex: String { didSet { defaults.set(customCardBorderHex, forKey: Keys.customCardBorderHex) } }
-    @Published var customHeaderHex: String { didSet { defaults.set(customHeaderHex, forKey: Keys.customHeaderHex) } }
-    @Published var customFooterHex: String { didSet { defaults.set(customFooterHex, forKey: Keys.customFooterHex) } }
-    @Published var customSidebarHex: String { didSet { defaults.set(customSidebarHex, forKey: Keys.customSidebarHex) } }
-    @Published var customScrollbarHex: String { didSet { defaults.set(customScrollbarHex, forKey: Keys.customScrollbarHex) } }
-    @Published var customTextPrimaryHex: String { didSet { defaults.set(customTextPrimaryHex, forKey: Keys.customTextPrimaryHex) } }
-    @Published var customTextSecondaryHex: String { didSet { defaults.set(customTextSecondaryHex, forKey: Keys.customTextSecondaryHex) } }
-    @Published var customAccentHex: String { didSet { defaults.set(customAccentHex, forKey: Keys.customAccentHex) } }
+    @AppDefault(Keys.customIsDark, default: false)
+    var customIsDark: Bool
+
+    @AppDefault(Keys.customPanelHex, default: "#FFFFFF")
+    var customPanelHex: String
+
+    @AppDefault(Keys.customScrollBgHex, default: "#F6F8FA")
+    var customScrollBgHex: String
+
+    @AppDefault(Keys.customCardSurfaceHex, default: "#FFFFFF")
+    var customCardSurfaceHex: String
+
+    @AppDefault(Keys.customCardBorderHex, default: "#D0D7DE")
+    var customCardBorderHex: String
+
+    @AppDefault(Keys.customHeaderHex, default: "#FFFFFF")
+    var customHeaderHex: String
+
+    @AppDefault(Keys.customFooterHex, default: "#F6F8FA")
+    var customFooterHex: String
+
+    @AppDefault(Keys.customSidebarHex, default: "#F6F8FA")
+    var customSidebarHex: String
+
+    @AppDefault(Keys.customScrollbarHex, default: "#AFB8C1")
+    var customScrollbarHex: String
+
+    @AppDefault(Keys.customTextPrimaryHex, default: "#1F2328")
+    var customTextPrimaryHex: String
+
+    @AppDefault(Keys.customTextSecondaryHex, default: "#656D76")
+    var customTextSecondaryHex: String
+
+    @AppDefault(Keys.customAccentHex, default: "#0969DA")
+    var customAccentHex: String
 
     // MARK: - AI / LLM integration
 
     /// Master switch for all AI/agentic features. Off by default; nothing reaches
     /// a provider until the user opts in and configures one.
-    @Published var aiEnabled: Bool {
-        didSet { defaults.set(aiEnabled, forKey: Keys.aiEnabled) }
-    }
+    @AppDefault(Keys.aiEnabled, default: false)
+    var aiEnabled: Bool
+
     /// Which backend to talk to. The API key (when needed) lives in the keychain,
     /// never here.
-    @Published var aiProvider: AIProviderKind {
-        didSet { defaults.set(aiProvider.rawValue, forKey: Keys.aiProvider) }
-    }
+    @AppDefault(Keys.aiProvider, default: AIProviderKind.ollama)
+    var aiProvider: AIProviderKind
+
     /// Model id / Azure deployment name. Empty falls back to the provider default.
-    @Published var aiModel: String {
-        didSet { defaults.set(aiModel, forKey: Keys.aiModel) }
-    }
+    @AppDefault(Keys.aiModel, default: "")
+    var aiModel: String
+
     /// Endpoint base URL. Empty falls back to the provider default.
-    @Published var aiBaseURL: String {
-        didSet { defaults.set(aiBaseURL, forKey: Keys.aiBaseURL) }
-    }
+    @AppDefault(Keys.aiBaseURL, default: "")
+    var aiBaseURL: String
+
     /// Azure AI Foundry data-plane api-version.
-    @Published var aiAzureAPIVersion: String {
-        didSet { defaults.set(aiAzureAPIVersion, forKey: Keys.aiAzureAPIVersion) }
-    }
+    @AppDefault(Keys.aiAzureAPIVersion, default: "2024-10-21")
+    var aiAzureAPIVersion: String
+
     /// When on, newly captured clips get an AI-suggested title automatically
     /// (still reversible; the only auto-applied action).
-    @Published var aiAutoSuggestTitles: Bool {
-        didSet { defaults.set(aiAutoSuggestTitles, forKey: Keys.aiAutoSuggestTitles) }
-    }
+    @AppDefault(Keys.aiAutoSuggestTitles, default: false)
+    var aiAutoSuggestTitles: Bool
+
     /// When on, the AI assistant may run saved scripts via the run_script tool.
     /// Off by default; user must explicitly opt in.
-    @Published var aiAgentAllowScripts: Bool {
-        didSet { defaults.set(aiAgentAllowScripts, forKey: Keys.aiAgentAllowScripts) }
-    }
+    @AppDefault(Keys.aiAgentAllowScripts, default: false)
+    var aiAgentAllowScripts: Bool
+
     /// When on, the AI assistant may execute AI-generated code via the execute_code tool.
     /// Off by default; user must explicitly opt in.
-    @Published var aiAgentAllowCodeExecution: Bool {
-        didSet { defaults.set(aiAgentAllowCodeExecution, forKey: Keys.aiAgentAllowCodeExecution) }
-    }
+    @AppDefault(Keys.aiAgentAllowCodeExecution, default: false)
+    var aiAgentAllowCodeExecution: Bool
 
     // MARK: - 1Password
 
     /// Show the 1Password vault as a sidebar category. Off by default; requires
     /// the `op` CLI installed and signed in.
-    @Published var onePasswordEnabled: Bool {
-        didSet { defaults.set(onePasswordEnabled, forKey: Keys.onePasswordEnabled) }
-    }
+    @AppDefault(Keys.onePasswordEnabled, default: false)
+    var onePasswordEnabled: Bool
+
     /// The vault Clippy reads from and creates secrets in.
-    @Published var onePasswordVault: String {
-        didSet { defaults.set(onePasswordVault, forKey: Keys.onePasswordVault) }
-    }
+    @AppDefault(Keys.onePasswordVault, default: "Clippy")
+    var onePasswordVault: String
+
     /// When true, the clipboard is cleared N seconds after copying a 1Password
     /// secret (only if the pasteboard still holds that exact write).
-    @Published var onePasswordAutoClearClipboard: Bool {
-        didSet { defaults.set(onePasswordAutoClearClipboard, forKey: Keys.onePasswordAutoClearClipboard) }
-    }
-    /// Seconds to wait before auto-clearing a copied 1Password secret. Default 90.
-    @Published var onePasswordAutoClearDelaySecs: Int {
-        didSet { defaults.set(onePasswordAutoClearDelaySecs, forKey: Keys.onePasswordAutoClearDelaySecs) }
-    }
+    @AppDefault(Keys.onePasswordAutoClearClipboard, default: true)
+    var onePasswordAutoClearClipboard: Bool
 
     // MARK: - iCloud sync
 
     /// Mirror clips and categories to the user's private CloudKit database.
-    @Published var iCloudSyncEnabled: Bool {
-        didSet { defaults.set(iCloudSyncEnabled, forKey: Keys.iCloudSyncEnabled) }
-    }
+    @AppDefault(Keys.iCloudSyncEnabled, default: false)
+    var iCloudSyncEnabled: Bool
 
     /// When true, clicking a clip card only copies it to the clipboard. When
     /// false (default), clicking also pastes into the frontmost app.
-    @Published var clickCopyOnly: Bool {
-        didSet { defaults.set(clickCopyOnly, forKey: Keys.clickCopyOnly) }
-    }
+    @AppDefault(Keys.clickCopyOnly, default: false)
+    var clickCopyOnly: Bool
+
     /// Per-character pacing for the "send keystrokes" action.
-    @Published var keystrokeSpeed: KeystrokeSpeed {
-        didSet { defaults.set(keystrokeSpeed.rawValue, forKey: Keys.keystrokeSpeed) }
-    }
-    /// Above this character count, "send keystrokes" asks for confirmation so an
-    /// accidental click does not type thousands of characters.
-    @Published var keystrokeWarnThreshold: Int {
-        didSet { defaults.set(keystrokeWarnThreshold, forKey: Keys.keystrokeWarnThreshold) }
-    }
-    /// Whether the bundled MCP server integration is presented as enabled.
+    @AppDefault(Keys.keystrokeSpeed, default: KeystrokeSpeed.balanced)
+    var keystrokeSpeed: KeystrokeSpeed
+
+    // mcpEnabled: kept @Published because McpServerController subscribes via
+    // $mcpEnabled to start/stop the server live on toggle.
     @Published var mcpEnabled: Bool {
         didSet { defaults.set(mcpEnabled, forKey: Keys.mcpEnabled) }
-    }
-    /// Preferred localhost port for the bundled MCP HTTP server. Clippy verifies
-    /// this port is free before binding and surfaces a conflict if it is not.
-    @Published var mcpPort: Int {
-        didSet { defaults.set(mcpPort, forKey: Keys.mcpPort) }
     }
 
     // MARK: - Panel behavior
@@ -373,41 +380,109 @@ final class AppSettings: ObservableObject {
     /// When true, the panel hides if the user clicks another app (key resignation).
     /// Default false: preserves the existing always-persistent behavior so existing
     /// users see no change until they opt in.
-    @Published var hideOnClickAway: Bool {
-        didSet { defaults.set(hideOnClickAway, forKey: Keys.hideOnClickAway) }
-    }
+    @AppDefault(Keys.hideOnClickAway, default: false)
+    var hideOnClickAway: Bool
+
     /// When true, more than one category can be selected at once in the panel.
     /// Default false: preserves the existing single-selection behavior so existing
     /// users see no change until they opt in.
-    @Published var allowMultipleCategories: Bool {
-        didSet { defaults.set(allowMultipleCategories, forKey: Keys.allowMultipleCategories) }
-    }
+    @AppDefault(Keys.allowMultipleCategories, default: false)
+    var allowMultipleCategories: Bool
+
     /// When true, the panel hides after a paste or keystroke action (current behavior).
     /// Default true: preserves existing behavior; set false to keep the panel open
     /// for rapid multi-paste workflows.
-    @Published var hideAfterPaste: Bool {
-        didSet { defaults.set(hideAfterPaste, forKey: Keys.hideAfterPaste) }
-    }
+    @AppDefault(Keys.hideAfterPaste, default: true)
+    var hideAfterPaste: Bool
+
     /// When true, pressing Escape closes the panel (current behavior).
     /// Default true: preserves existing behavior.
-    @Published var hideOnEscape: Bool {
-        didSet { defaults.set(hideOnEscape, forKey: Keys.hideOnEscape) }
-    }
+    @AppDefault(Keys.hideOnEscape, default: true)
+    var hideOnEscape: Bool
+
     /// Window level and floating behavior for the panel. alwaysOnTop is the
     /// current default (.statusBar level); other values trade visibility for
     /// less intrusion into normal app z-order.
-    @Published var panelFloatLevel: PanelFloatLevel {
-        didSet { defaults.set(panelFloatLevel.rawValue, forKey: Keys.panelFloatLevel) }
-    }
+    @AppDefault(Keys.panelFloatLevel, default: PanelFloatLevel.alwaysOnTop)
+    var panelFloatLevel: PanelFloatLevel
+
     /// When true, suppresses all auto-hide triggers (click-away, after-paste,
     /// Escape) so the panel stays open regardless of other behavior settings.
     /// Intended as a quick "pin" override, default false.
-    @Published var panelPinned: Bool {
-        didSet { defaults.set(panelPinned, forKey: Keys.panelPinned) }
+    @AppDefault(Keys.panelPinned, default: false)
+    var panelPinned: Bool
+
+    // MARK: - Properties kept as @Published (clamping or migration logic in init)
+    //
+    // These cannot be collapsed into @AppDefault because their init reads more
+    // than a plain UserDefaults fetch: they clamp to a valid range or run a
+    // migration. The @Published + didSet pattern is intentionally kept here.
+
+    /// Base font size in points (11-16). Clamped in init; 0 means key never written.
+    @Published var fontSizeBase: Int {
+        didSet { defaults.set(fontSizeBase, forKey: Keys.fontSizeBase) }
     }
+
+    /// Panel translucency, 0.30 (very see-through) to 1.0 (fully solid). At 1.0
+    /// the panel is opaque with no blur, which is the fix for the washed-out
+    /// look; below 1.0 a blur shows the desktop through the tinted background.
+    /// Clamped in init to 0.3-1.0.
+    @Published var panelOpacity: Double {
+        didSet { defaults.set(panelOpacity, forKey: Keys.panelOpacity) }
+    }
+
+    /// Stable identifier of the chosen capture sound. Init runs resolveSoundID()
+    /// to migrate the legacy captureSoundName key written by older builds.
+    @Published var captureSoundID: String {
+        didSet { defaults.set(captureSoundID, forKey: Keys.captureSoundID) }
+    }
+
+    /// Above this character count, "send keystrokes" asks for confirmation.
+    /// Init guards stored > 0 to recover from a corrupt/missing entry.
+    @Published var keystrokeWarnThreshold: Int {
+        didSet { defaults.set(keystrokeWarnThreshold, forKey: Keys.keystrokeWarnThreshold) }
+    }
+
+    /// Seconds to wait before auto-clearing a copied 1Password secret. Default 90.
+    /// Init clamps to 10-600.
+    @Published var onePasswordAutoClearDelaySecs: Int {
+        didSet { defaults.set(onePasswordAutoClearDelaySecs, forKey: Keys.onePasswordAutoClearDelaySecs) }
+    }
+
+    /// Preferred localhost port for the bundled MCP HTTP server. Clamped in init
+    /// to a valid user-space port (1024-65535).
+    @Published var mcpPort: Int {
+        didSet { defaults.set(mcpPort, forKey: Keys.mcpPort) }
+    }
+
+    // MARK: - Computed properties (not persisted directly)
 
     /// The resolved token table for the active theme. Views read this.
     var theme: ThemeTokens { Theme.tokens(self) }
+
+    var accentColor: Color { accentTheme.color }
+
+    /// Where the panel was last closed, for the "last position" mode.
+    var lastPanelOrigin: CGPoint? {
+        get {
+            guard defaults.object(forKey: Keys.lastPanelX) != nil else { return nil }
+            return CGPoint(
+                x: defaults.double(forKey: Keys.lastPanelX),
+                y: defaults.double(forKey: Keys.lastPanelY)
+            )
+        }
+        set {
+            guard let newValue else {
+                defaults.removeObject(forKey: Keys.lastPanelX)
+                defaults.removeObject(forKey: Keys.lastPanelY)
+                return
+            }
+            defaults.set(newValue.x, forKey: Keys.lastPanelX)
+            defaults.set(newValue.y, forKey: Keys.lastPanelY)
+        }
+    }
+
+    // MARK: - Methods
 
     /// Reset every custom-mode color to the Clean Light seed.
     func resetCustomColors() {
@@ -444,30 +519,15 @@ final class AppSettings: ObservableObject {
         customIsDark = t.isDark
     }
 
-    var accentColor: Color { accentTheme.color }
-
-    /// Where the panel was last closed, for the "last position" mode.
-    var lastPanelOrigin: CGPoint? {
-        get {
-            guard defaults.object(forKey: Keys.lastPanelX) != nil else { return nil }
-            return CGPoint(
-                x: defaults.double(forKey: Keys.lastPanelX),
-                y: defaults.double(forKey: Keys.lastPanelY)
-            )
-        }
-        set {
-            guard let newValue else {
-                defaults.removeObject(forKey: Keys.lastPanelX)
-                defaults.removeObject(forKey: Keys.lastPanelY)
-                return
-            }
-            defaults.set(newValue.x, forKey: Keys.lastPanelX)
-            defaults.set(newValue.y, forKey: Keys.lastPanelY)
-        }
-    }
+    // MARK: - Init
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+
+        // Register all defaults so UserDefaults.standard returns correct
+        // values even before the user has ever touched a setting. @AppDefault
+        // reads .standard directly, so registration must happen before any
+        // @AppDefault wrapper is accessed.
         defaults.register(defaults: [
             Keys.positionMode: PanelPositionMode.caret.rawValue,
             Keys.panelWidth: 640.0,
@@ -536,85 +596,35 @@ final class AppSettings: ObservableObject {
             Keys.panelFloatLevel: PanelFloatLevel.alwaysOnTop.rawValue,
             Keys.panelPinned: false,
         ])
-        positionMode = PanelPositionMode(rawValue: defaults.string(forKey: Keys.positionMode) ?? "") ?? .caret
-        panelWidth = defaults.double(forKey: Keys.panelWidth)
-        panelHeight = defaults.double(forKey: Keys.panelHeight)
-        rememberPanelSize = defaults.bool(forKey: Keys.rememberPanelSize)
+
+        // Init loads only the properties that cannot be expressed as a plain
+        // @AppDefault read: those requiring range clamping or migration logic.
+        // All other properties are read on-demand by the @AppDefault wrapper.
+
         pollingIntervalMs = defaults.double(forKey: Keys.pollingIntervalMs)
-        maxHistoryItems = defaults.integer(forKey: Keys.maxHistoryItems)
-        movePastedItemToTop = defaults.bool(forKey: Keys.movePastedItemToTop)
-        pastePlainTextByDefault = defaults.bool(forKey: Keys.pastePlainTextByDefault)
-        ignoredBundleIDs = defaults.stringArray(forKey: Keys.ignoredBundleIDs) ?? []
-        appearanceMode = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearanceMode) ?? "") ?? .system
-        accentTheme = AccentTheme(rawValue: defaults.string(forKey: Keys.accentTheme) ?? "") ?? .clippyAmber
-        panelMaterial = PanelMaterialStyle(rawValue: defaults.string(forKey: Keys.panelMaterial) ?? "") ?? .regular
-        cardColorMode = CardColorMode(rawValue: defaults.string(forKey: Keys.cardColorMode) ?? "") ?? .byApp
-        showAppIcons = defaults.bool(forKey: Keys.showAppIcons)
-        showSectionHeaders = defaults.bool(forKey: Keys.showSectionHeaders)
-        captureImages = defaults.bool(forKey: Keys.captureImages)
-        maxImageSizeMB = defaults.integer(forKey: Keys.maxImageSizeMB)
-        captureSoundEnabled = defaults.bool(forKey: Keys.captureSoundEnabled)
-        captureSoundID = Self.resolveSoundID(defaults)
-        captureSoundVolume = defaults.integer(forKey: Keys.captureSoundVolume)
-        cardStyle = CardStyle(rawValue: defaults.string(forKey: Keys.cardStyle) ?? "") ?? .filled
-        cardTintStrength = defaults.integer(forKey: Keys.cardTintStrength)
-        highContrastCardText = defaults.bool(forKey: Keys.highContrastCardText)
-        fontFamily = PanelFontFamily(rawValue: defaults.string(forKey: Keys.fontFamily) ?? "") ?? .systemDefault
+        mcpEnabled = defaults.bool(forKey: Keys.mcpEnabled)
         fontSizeBase = {
             let stored = defaults.integer(forKey: Keys.fontSizeBase)
             // Clamp to valid range; 0 means the key was never written (integer returns 0).
             return stored >= 11 && stored <= 16 ? stored : 13
         }()
-        themePreset = ThemePreset(rawValue: defaults.string(forKey: Keys.themePreset) ?? "") ?? .cleanLight
         panelOpacity = {
             let stored = defaults.double(forKey: Keys.panelOpacity)
             return stored >= 0.3 && stored <= 1.0 ? stored : 1.0
         }()
-        customIsDark = defaults.bool(forKey: Keys.customIsDark)
-        customPanelHex = defaults.string(forKey: Keys.customPanelHex) ?? "#FFFFFF"
-        customScrollBgHex = defaults.string(forKey: Keys.customScrollBgHex) ?? "#F6F8FA"
-        customCardSurfaceHex = defaults.string(forKey: Keys.customCardSurfaceHex) ?? "#FFFFFF"
-        customCardBorderHex = defaults.string(forKey: Keys.customCardBorderHex) ?? "#D0D7DE"
-        customHeaderHex = defaults.string(forKey: Keys.customHeaderHex) ?? "#FFFFFF"
-        customFooterHex = defaults.string(forKey: Keys.customFooterHex) ?? "#F6F8FA"
-        customSidebarHex = defaults.string(forKey: Keys.customSidebarHex) ?? "#F6F8FA"
-        customScrollbarHex = defaults.string(forKey: Keys.customScrollbarHex) ?? "#AFB8C1"
-        customTextPrimaryHex = defaults.string(forKey: Keys.customTextPrimaryHex) ?? "#1F2328"
-        customTextSecondaryHex = defaults.string(forKey: Keys.customTextSecondaryHex) ?? "#656D76"
-        customAccentHex = defaults.string(forKey: Keys.customAccentHex) ?? "#0969DA"
-        aiEnabled = defaults.bool(forKey: Keys.aiEnabled)
-        aiProvider = AIProviderKind(rawValue: defaults.string(forKey: Keys.aiProvider) ?? "") ?? .ollama
-        aiModel = defaults.string(forKey: Keys.aiModel) ?? ""
-        aiBaseURL = defaults.string(forKey: Keys.aiBaseURL) ?? ""
-        aiAzureAPIVersion = defaults.string(forKey: Keys.aiAzureAPIVersion) ?? "2024-10-21"
-        aiAutoSuggestTitles = defaults.bool(forKey: Keys.aiAutoSuggestTitles)
-        aiAgentAllowScripts = defaults.bool(forKey: Keys.aiAgentAllowScripts)
-        aiAgentAllowCodeExecution = defaults.bool(forKey: Keys.aiAgentAllowCodeExecution)
-        onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
-        onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? "Clippy"
-        onePasswordAutoClearClipboard = defaults.bool(forKey: Keys.onePasswordAutoClearClipboard)
-        onePasswordAutoClearDelaySecs = {
-            let stored = defaults.integer(forKey: Keys.onePasswordAutoClearDelaySecs)
-            return stored >= 10 && stored <= 600 ? stored : 90
-        }()
-        iCloudSyncEnabled = defaults.bool(forKey: Keys.iCloudSyncEnabled)
-        clickCopyOnly = defaults.bool(forKey: Keys.clickCopyOnly)
-        keystrokeSpeed = KeystrokeSpeed(rawValue: defaults.string(forKey: Keys.keystrokeSpeed) ?? "") ?? .balanced
+        captureSoundID = Self.resolveSoundID(defaults)
         keystrokeWarnThreshold = {
             let stored = defaults.integer(forKey: Keys.keystrokeWarnThreshold)
             return stored > 0 ? stored : 2000
         }()
-        mcpEnabled = defaults.bool(forKey: Keys.mcpEnabled)
+        onePasswordAutoClearDelaySecs = {
+            let stored = defaults.integer(forKey: Keys.onePasswordAutoClearDelaySecs)
+            return stored >= 10 && stored <= 600 ? stored : 90
+        }()
         mcpPort = {
             let stored = defaults.integer(forKey: Keys.mcpPort)
             return (stored >= 1024 && stored <= 65535) ? stored : 51764
         }()
-        hideOnClickAway = defaults.bool(forKey: Keys.hideOnClickAway)
-        allowMultipleCategories = defaults.bool(forKey: Keys.allowMultipleCategories)
-        hideAfterPaste = defaults.bool(forKey: Keys.hideAfterPaste)
-        hideOnEscape = defaults.bool(forKey: Keys.hideOnEscape)
-        panelFloatLevel = PanelFloatLevel(rawValue: defaults.string(forKey: Keys.panelFloatLevel) ?? "") ?? .alwaysOnTop
-        panelPinned = defaults.bool(forKey: Keys.panelPinned)
     }
 
     /// Resolve the stored sound id, migrating the legacy classic-enum key the
