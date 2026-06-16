@@ -173,17 +173,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .integrations: return "puzzlepiece.extension.fill"
         }
     }
-
-    var tint: Color {
-        switch self {
-        case .general: return Color(nsColor: .systemGray)
-        case .appearance: return Color(nsColor: .systemPink)
-        case .capture: return Color(nsColor: .systemBlue)
-        case .ai: return Color(nsColor: .systemPurple)
-        case .scripts: return Color(nsColor: .systemGreen)
-        case .integrations: return Color(nsColor: .systemOrange)
-        }
-    }
 }
 
 extension Bundle {

@@ -258,7 +258,7 @@ private struct ScriptRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(PanelTypography.micro(settings).weight(.semibold))
-                .foregroundStyle(isError ? Color(nsColor: .systemRed).opacity(0.8) : tokens.textSecondary)
+                .foregroundStyle(isError ? tokens.danger.opacity(0.8) : tokens.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(String(text.trimmingCharacters(in: .newlines).prefix(2000)))
                     .font(.system(size: 11, design: .monospaced))
