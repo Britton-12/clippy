@@ -10,6 +10,7 @@ struct ClipListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let onPaste: (Clip, Bool) -> Void
+    let onPasteMany: ([Clip], Bool, Bool) -> Void
     let onPrimary: (Clip) -> Void
     let onSendKeystrokes: (Clip) -> Void
     let onEdit: (Clip) -> Void
