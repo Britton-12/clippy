@@ -80,11 +80,16 @@ enum KeystrokeSpeed: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
-    // Explicit publisher so the @AppDefault subscript can always resolve
-    // instance.objectWillChange as ObservableObjectPublisher. With no
-    // @Published properties remaining the compiler's synthesized publisher
-    // type is implementation-defined; declaring it explicitly is safer.
-    let objectWillChange = ObservableObjectPublisher()
+    // objectWillChange is left to the compiler. With @Published properties
+    // present, Swift synthesizes it as ObservableObjectPublisher AND wires
+    // every @Published willSet to it. A hand-rolled publisher here would
+    // suppress that auto-wiring, so @Published settings (pollingIntervalMs,
+    // mcpEnabled, fontSizeBase, panelOpacity, captureSoundID, ...) would
+    // mutate without notifying any view -- the "nothing can be changed"
+    // regression. The @AppDefault subscript's
+    // `ObjectWillChangePublisher == ObservableObjectPublisher` constraint
+    // still holds against the synthesized publisher, so its explicit
+    // `objectWillChange.send()` keeps working.
 
     private enum Keys {
         static let positionMode = "positionMode"
