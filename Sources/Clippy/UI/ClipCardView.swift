@@ -204,6 +204,7 @@ struct ClipCardView: View {
         } else {
             Image(systemName: "app.dashed")
                 .font(.system(size: iconSize))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.textSecondary)
                 .frame(width: 16, height: 16)
         }
@@ -216,6 +217,7 @@ struct ClipCardView: View {
         case .symbol:
             Image(systemName: category.iconValue)
                 .font(.system(size: iconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color(hexString: category.colorHex))
         case .emoji:
             Text(category.iconValue)
@@ -226,7 +228,8 @@ struct ClipCardView: View {
             } else {
                 Image(systemName: "app.dashed")
                     .font(.system(size: iconSize))
-                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tokens.textSecondary)
             }
         }
     }
@@ -299,17 +302,22 @@ struct ClipCardView: View {
             }
             Image(systemName: kind.iconName)
                 .font(.system(size: iconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(kind.tint)
             if clip.isRich {
                 Image(systemName: "textformat")
                     .font(.system(size: iconSize))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tokens.textSecondary)
                     .help("Has rich formatting")
             }
             if isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: iconSize))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tokens.accent)
+                    // Bounce when a card becomes pinned so the toggle is felt.
+                    .symbolEffect(.bounce, value: reduceMotion ? false : isPinned)
             }
             Text(clip.createdAt, format: Date.RelativeFormatStyle(presentation: .numeric, unitsStyle: .narrow))
                 .font(PanelTypography.metadata(settings))
@@ -350,13 +358,16 @@ struct ClipCardView: View {
         Button(role: role, action: action) {
             Image(systemName: symbol)
                 .font(.system(size: iconSize, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
                 // Larger hit target than the glyph; contentShape makes the whole
                 // frame clickable, not just the opaque pixels.
                 .frame(width: 28, height: 24)
                 .contentShape(Rectangle())
+                // Cross-fade when a button's glyph swaps in place (pin <-> pin.slash).
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : tokens.textSecondary)
+        .foregroundStyle(role == .destructive ? tokens.danger : tokens.textSecondary)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -429,7 +440,8 @@ struct ClipCardView: View {
                 } else {
                     Image(systemName: "photo")
                         .font(.system(size: 24, weight: .light))
-                        .foregroundStyle(.tertiary)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(tokens.textSecondary)
                         .frame(width: 72, height: 48)
                 }
             }

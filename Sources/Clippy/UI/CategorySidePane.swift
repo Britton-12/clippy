@@ -256,6 +256,9 @@ struct CategorySidePane: View {
         // press-and-move free to begin the reorder drag.
         HStack(spacing: 7) {
             icon()
+                // Hierarchical gives each sidebar glyph depth from its row tint.
+                // Harmless on the emoji/app-logo icon variants that flow through here.
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tint)
                 .frame(width: 18)
             Text(title)

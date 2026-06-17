@@ -26,6 +26,8 @@ struct PanelHeaderView: View {
     let onOpenSettings: () -> Void
     let onClose: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var tokens: ThemeTokens { AppSettings.shared.theme }
     private let settings = AppSettings.shared
 
@@ -49,9 +51,20 @@ struct PanelHeaderView: View {
                     // Hit-transparent for the same reason as the mark above.
                     .allowsHitTesting(false)
                 Spacer(minLength: 0)
-                headerButton(systemName: isPinned ? "pin.fill" : "pin",
-                             help: isPinned ? "Unpin panel" : "Pin panel",
-                             action: onTogglePin)
+                Button(action: onTogglePin) {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 11, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isPinned ? tokens.accent : tokens.textSecondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                        // Swap pin <-> pin.fill as a symbol replace, and bounce
+                        // once on the pin/unpin toggle so the state change registers.
+                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: reduceMotion ? false : isPinned)
+                }
+                .buttonStyle(.plain)
+                .help(isPinned ? "Unpin panel" : "Pin panel")
                 headerButton(systemName: "gearshape",
                              help: "Settings", action: onOpenSettings)
                 headerButton(systemName: "xmark",
@@ -70,6 +83,7 @@ struct PanelHeaderView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.textSecondary)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())

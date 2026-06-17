@@ -32,6 +32,7 @@ struct ScriptsPanelView: View {
         VStack(spacing: 16) {
             Image(systemName: "terminal")
                 .font(.system(size: 36, weight: .light))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.textSecondary)
             Text("No scripts yet")
                 .font(PanelTypography.body(settings).weight(.semibold))
@@ -104,6 +105,7 @@ private struct ScriptRowView: View {
     @Binding var runState: RunState
     let tokens: ThemeTokens
     let settings: AppSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -165,6 +167,7 @@ private struct ScriptRowView: View {
     private func flagBadge(_ icon: String, _ help: String) -> some View {
         Image(systemName: icon)
             .font(.system(size: 9, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
             .foregroundStyle(tokens.textSecondary)
             .help(help)
     }
@@ -185,6 +188,7 @@ private struct ScriptRowView: View {
                 } else {
                     Image(systemName: "play.fill")
                         .font(.system(size: 11, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
                 }
             }
             .frame(width: 28, height: 28)
@@ -219,8 +223,11 @@ private struct ScriptRowView: View {
                 Image(systemName: result.timedOut
                     ? "exclamationmark.clock.fill"
                     : (result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill"))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(result.succeeded ? tokens.success : tokens.danger)
                     .font(.system(size: 12))
+                    // Pop the status glyph in when a run finishes (success or fail).
+                    .symbolEffect(.bounce, value: reduceMotion ? false : result.succeeded)
                 Text(statusLabel(result))
                     .font(PanelTypography.metadata(settings).weight(.medium))
                     .foregroundStyle(result.succeeded ? tokens.success : tokens.danger)

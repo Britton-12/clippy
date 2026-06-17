@@ -79,6 +79,7 @@ struct SettingsView: View {
                         .frame(width: 22, height: 22)
                     Image(systemName: section.icon)
                         .font(.system(size: 11, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.white)
                 }
                 Text(section.title)
@@ -103,6 +104,7 @@ struct SettingsView: View {
         HStack(spacing: 6) {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 10))
+                .symbolRenderingMode(.hierarchical)
             Text("Clippy \(Bundle.main.shortVersion)")
                 .font(.system(size: 10))
         }
@@ -539,6 +541,7 @@ private struct AppearanceSettingsTab: View {
                     if isSelected {
                         Image(systemName: "checkmark")
                             .font(.system(size: 9, weight: .bold))
+                            .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.white)
                     }
                 }
@@ -611,6 +614,7 @@ private struct CustomColorRow: View {
                         isInvalid = false
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
+                            .symbolRenderingMode(.hierarchical)
                     }
                     .buttonStyle(.borderless)
                     .help("Reset to the theme's color")
@@ -753,6 +757,7 @@ private struct CaptureSettingsTab: View {
                             )
                         } label: {
                             Image(systemName: "play.circle")
+                                .symbolRenderingMode(.hierarchical)
                         }
                         .buttonStyle(.plain)
                         .help("Preview selected sound")
@@ -865,6 +870,7 @@ private struct CaptureSettingsTab: View {
 private struct AISettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var mcpController = McpServerController.shared
+    private var tokens: ThemeTokens { settings.theme }
     @State private var apiKey = ""
     @State private var keyStatus = ""
     @State private var testResult: String?
@@ -904,9 +910,15 @@ private struct AISettingsTab: View {
                             .disabled(apiKey.isEmpty)
                         Button("Clear") { clearKey() }
                         if !keyStatus.isEmpty {
-                            Label(keyStatus, systemImage: keyStatus.hasPrefix("Key") ? "checkmark.circle.fill" : "xmark.circle")
+                            let keySaved = keyStatus.hasPrefix("Key")
+                            Label {
+                                Text(keyStatus)
+                            } icon: {
+                                Image(systemName: keySaved ? "checkmark.circle.fill" : "xmark.circle")
+                                    .symbolRenderingMode(.hierarchical)
+                            }
                                 .font(.caption)
-                                .foregroundStyle(keyStatus.hasPrefix("Key") ? Color.green : Color.secondary)
+                                .foregroundStyle(keySaved ? tokens.success : tokens.textSecondary)
                         }
                     }
                 } else {
@@ -966,11 +978,15 @@ private struct AISettingsTab: View {
                             .frame(width: 70)
                             .multilineTextAlignment(.trailing)
                         let portFree = mcpController.isPortFree(settings.mcpPort)
-                        Label(portFree ? "Port \(settings.mcpPort) is available"
-                                       : "Port \(settings.mcpPort) is in use",
-                              systemImage: portFree ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        Label {
+                            Text(portFree ? "Port \(settings.mcpPort) is available"
+                                          : "Port \(settings.mcpPort) is in use")
+                        } icon: {
+                            Image(systemName: portFree ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .symbolRenderingMode(.hierarchical)
+                        }
                             .font(.caption)
-                            .foregroundStyle(portFree ? Color.green : Color.orange)
+                            .foregroundStyle(portFree ? tokens.success : tokens.danger)
                     }
                 }
                 .disabled(!settings.mcpEnabled)
@@ -992,10 +1008,21 @@ private struct AISettingsTab: View {
                 ForEach(McpClient.allCases) { client in
                     HStack {
                         if mcpInstalledClients.contains(client) {
-                            Label(client.displayName, systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                            Label {
+                                Text(client.displayName)
+                            } icon: {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                                .foregroundStyle(tokens.success)
                         } else {
-                            Label(client.displayName, systemImage: "circle")
+                            Label {
+                                Text(client.displayName)
+                            } icon: {
+                                Image(systemName: "circle")
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(tokens.textSecondary)
+                            }
                         }
                         Spacer()
                         Button("Install") {
@@ -1135,6 +1162,7 @@ private struct AISettingsTab: View {
 private struct IntegrationsSettingsTab: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var cloud = ICloudSyncService.shared
+    private var tokens: ThemeTokens { settings.theme }
     @State private var exportResult: String?
     @State private var archiveResult: String?
 
@@ -1195,7 +1223,8 @@ private struct IntegrationsSettingsTab: View {
                 HStack(alignment: .firstTextBaseline) {
                     Image(systemName: OnePasswordService.isInstalled ? "checkmark.circle.fill" : "xmark.circle")
                         .font(.caption)
-                        .foregroundStyle(OnePasswordService.isInstalled ? .green : .secondary)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(OnePasswordService.isInstalled ? tokens.success : tokens.textSecondary)
                     Text(OnePasswordService.isInstalled
                          ? "1Password CLI (op) found."
                          : "1Password CLI (op) not found. Enable it in 1Password 8 > Developer.")

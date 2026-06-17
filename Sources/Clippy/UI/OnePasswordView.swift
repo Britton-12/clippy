@@ -7,6 +7,7 @@ import SwiftUI
 /// or logged by Clippy.
 struct OnePasswordView: View {
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var items: [OPItem] = []
     @State private var loading = false
@@ -35,13 +36,27 @@ struct OnePasswordView: View {
 
     private var header: some View {
         HStack {
-            Label("1Password \u{00B7} \(settings.onePasswordVault)", systemImage: "key.fill")
+            Label {
+                Text("1Password \u{00B7} \(settings.onePasswordVault)")
+                    .foregroundStyle(tokens.textPrimary)
+            } icon: {
+                Image(systemName: "key.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(tokens.accent, tokens.textSecondary)
+            }
                 .font(PanelTypography.body(settings).weight(.semibold))
-                .foregroundStyle(tokens.textPrimary)
             Spacer()
-            Button { creating.toggle() } label: { Image(systemName: "plus") }
+            Button { creating.toggle() } label: {
+                Image(systemName: "plus").symbolRenderingMode(.hierarchical)
+            }
                 .help("New secret")
-            Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+            Button { reload() } label: {
+                Image(systemName: "arrow.clockwise")
+                    .symbolRenderingMode(.hierarchical)
+                    // Spin the refresh glyph while a reload is in flight; the
+                    // variableColor cycle reads as "working" and stops on load.
+                    .symbolEffect(.variableColor, isActive: !reduceMotion && loading)
+            }
                 .help("Refresh")
                 .disabled(loading)
         }
@@ -108,15 +123,22 @@ struct OnePasswordView: View {
             toggleExpand(item)
         } label: {
             HStack {
-                Image(systemName: "lock.doc").foregroundStyle(.secondary)
+                Image(systemName: "lock.doc")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tokens.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
-                    Text(item.category.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption2).foregroundStyle(.secondary)
+                    Text(item.category.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption2).foregroundStyle(tokens.textSecondary)
                 }
                 Spacer()
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                Image(systemName: "chevron.down")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tokens.textSecondary)
+                    // One fixed chevron rotated, not two swapped glyphs, so the
+                    // expand/collapse change animates smoothly instead of popping.
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isExpanded)
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 6)
@@ -143,8 +165,13 @@ struct OnePasswordView: View {
                 .padding(.horizontal, 8)
             } else if let detailError {
                 HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    Text(detailError).font(.caption).foregroundStyle(.secondary)
+                    Image(systemName: "exclamationmark.triangle")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(tokens.danger)
+                        // Bounce once when an error surfaces so it draws the eye.
+                        // Keyed on the message so a new error re-triggers the bounce.
+                        .symbolEffect(.bounce, value: reduceMotion ? "" : detailError)
+                    Text(detailError).font(.caption).foregroundStyle(tokens.textSecondary)
                 }
                 .padding(.horizontal, 8)
             } else if let detail {
@@ -176,7 +203,10 @@ struct OnePasswordView: View {
 
     private func message(_ title: String, detail: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: "key.slash").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
+            Image(systemName: "key.slash")
+                .font(.system(size: 28, weight: .light))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tokens.textSecondary)
             Text(title).font(PanelTypography.body(settings).weight(.semibold))
             Text(detail).font(PanelTypography.metadata(settings)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
@@ -269,6 +299,7 @@ private struct FieldRow: View {
     let autoClearSecs: Int
 
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var tokens: ThemeTokens { settings.theme }
 
     @State private var revealed = false
@@ -318,6 +349,10 @@ private struct FieldRow: View {
                     } label: {
                         Image(systemName: revealed ? "eye.slash" : "eye")
                             .font(.caption2)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(tokens.accent)
+                            // Cross-fade eye <-> eye.slash on the reveal toggle.
+                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     }
                     .buttonStyle(.plain)
                     .help(revealed ? "Hide" : "Reveal")

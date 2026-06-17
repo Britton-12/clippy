@@ -98,7 +98,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         runningTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.state = .ready; self.runningTask = nil }   // ALWAYS resets — kills the freeze class
+            defer { self.state = .ready; self.runningTask = nil }   // ALWAYS resets, kills the freeze class
             var buffer = ""
             var lastFlush = Date()
             // Local closure rather than a nested func so it inherits the
@@ -187,6 +187,7 @@ struct AIAssistantPanelView: View {
 
     @StateObject private var vm = AIAssistantViewModel()
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var inputFocused: Bool
     @State private var confirmClear = false
 
@@ -221,7 +222,10 @@ struct AIAssistantPanelView: View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.accent)
+                // Shimmer the mark while the assistant is generating a reply.
+                .symbolEffect(.variableColor, isActive: !reduceMotion && vm.state == .streaming)
             Text("AI Assistant")
                 .font(PanelTypography.body(settings).weight(.semibold))
                 .foregroundStyle(tokens.textPrimary)
@@ -232,6 +236,7 @@ struct AIAssistantPanelView: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(tokens.textSecondary)
                 }
                 .buttonStyle(.borderless)
@@ -273,6 +278,7 @@ struct AIAssistantPanelView: View {
             VStack(spacing: 20) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 36, weight: .light))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tokens.textSecondary)
                 Text("Ask the assistant anything about your clips, or ask it to create, search, or transform content.")
                     .font(PanelTypography.body(settings))
@@ -299,6 +305,7 @@ struct AIAssistantPanelView: View {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.up.circle")
                     .font(.system(size: 12))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tokens.accent)
                 Text(text)
                     .font(PanelTypography.body(settings))
@@ -380,6 +387,7 @@ struct AIAssistantPanelView: View {
         VStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.system(size: 36, weight: .light))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.textSecondary)
             Text(message)
                 .font(PanelTypography.body(settings))
@@ -416,9 +424,12 @@ struct AIAssistantPanelView: View {
             } label: {
                 Image(systemName: vm.state == .streaming ? "stop.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 22))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(
                         vm.state == .streaming ? tokens.accent
                         : (vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tokens.textSecondary : tokens.accent))
+                    // Swap send <-> stop as a symbol replace when streaming starts/ends.
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(vm.state == .streaming ? "Stop" : "Send")
@@ -437,6 +448,7 @@ private struct MessageBubble: View {
     let tokens: ThemeTokens
     let settings: AppSettings
     let isLive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
@@ -445,10 +457,14 @@ private struct MessageBubble: View {
                 // Error messages show a warning glyph prefix and use danger color.
                 Group {
                     if message.isError {
-                        Label(message.text.isEmpty ? " " : message.text,
-                              systemImage: "exclamationmark.triangle.fill")
+                        Label {
+                            Text(message.text.isEmpty ? " " : message.text)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .symbolRenderingMode(.hierarchical)
+                        }
                             .font(PanelTypography.body(settings))
-                            .foregroundStyle(Color(nsColor: .systemOrange))
+                            .foregroundStyle(tokens.danger)
                     } else if message.role == .assistant {
                         // While a turn is streaming, render plain Text: re-parsing the
                         // whole markdown string on every flush saturates the main thread.
@@ -474,13 +490,13 @@ private struct MessageBubble: View {
                 .background(
                     message.role == .user
                         ? tokens.accent
-                        : (message.isError ? Color(nsColor: .systemOrange).opacity(0.08) : tokens.cardSurface),
+                        : (message.isError ? tokens.danger.opacity(0.08) : tokens.cardSurface),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(
-                            message.isError ? Color(nsColor: .systemOrange).opacity(0.4)
+                            message.isError ? tokens.danger.opacity(0.4)
                                 : (message.role == .user ? Color.clear : tokens.cardBorder),
                             lineWidth: 1
                         )
@@ -496,15 +512,22 @@ private struct MessageBubble: View {
     }
 
     private func toolActivityLabel(_ activity: AssistantMessage.ToolActivity) -> some View {
-        let (icon, label): (String, String) = {
+        let (icon, label, isRunning): (String, String, Bool) = {
             switch activity {
-            case .running(let name): return ("gear", "Running \(name)...")
-            case .done(let name):    return ("checkmark.circle", "Ran \(name)")
+            case .running(let name): return ("gear", "Running \(name)...", true)
+            case .done(let name):    return ("checkmark.circle", "Ran \(name)", false)
             }
         }()
-        return Label(label, systemImage: icon)
+        return Label {
+            Text(label)
+        } icon: {
+            Image(systemName: icon)
+                .symbolRenderingMode(.hierarchical)
+                // Spin the gear while a tool runs; the finished checkmark is static.
+                .symbolEffect(.variableColor, isActive: !reduceMotion && isRunning)
+        }
             .font(PanelTypography.metadata(settings))
-            .foregroundStyle(tokens.textSecondary)
+            .foregroundStyle(isRunning ? tokens.accent : tokens.textSecondary)
             .padding(.leading, 4)
     }
 }
@@ -522,9 +545,15 @@ private struct InlineConfirmationCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Confirm action", systemImage: "exclamationmark.shield")
+            Label {
+                Text("Confirm action")
+                    .foregroundStyle(tokens.textPrimary)
+            } icon: {
+                Image(systemName: "exclamationmark.shield")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(tokens.danger, tokens.textSecondary)
+            }
                 .font(PanelTypography.body(settings).weight(.semibold))
-                .foregroundStyle(tokens.textPrimary)
             Text("The assistant wants to run this. Review before allowing.")
                 .font(PanelTypography.metadata(settings))
                 .foregroundStyle(tokens.textSecondary)

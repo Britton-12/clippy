@@ -318,6 +318,7 @@ struct ClipListView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tokens.textSecondary)
             TextField("Search clipboard history", text: $store.query)
                 .textFieldStyle(.plain)
@@ -717,7 +718,8 @@ struct ClipListView: View {
         VStack(spacing: 10) {
             Image(systemName: emptyIcon)
                 .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.tertiary)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tokens.textSecondary)
             Text(emptyMessage)
                 .font(PanelTypography.body(settings))
                 .foregroundStyle(tokens.textSecondary)
