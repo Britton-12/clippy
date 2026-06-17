@@ -181,8 +181,11 @@ final class AppDefaultTests: XCTestCase {
         // test explicitly checks the concrete type as an early-warning
         // canary at the Swift runtime level.
         let publisher = fixture.objectWillChange
-        XCTAssertNotNil(
-            publisher as? ObservableObjectPublisher,
+        // Check the dynamic type. The static type is already
+        // ObservableObjectPublisher, so a conditional cast would always
+        // succeed and warn; comparing the runtime type keeps the canary.
+        XCTAssertTrue(
+            type(of: publisher) == ObservableObjectPublisher.self,
             "FixtureSettings.objectWillChange must be ObservableObjectPublisher; " +
             "a custom publisher type would break the @AppDefault where-clause constraint."
         )

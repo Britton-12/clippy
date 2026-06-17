@@ -135,6 +135,8 @@ final class AppSettings: ObservableObject {
         static let customTextPrimaryHex = "customTextPrimaryHex"
         static let customTextSecondaryHex = "customTextSecondaryHex"
         static let customAccentHex = "customAccentHex"
+        static let customSuccessHex = "customSuccessHex"
+        static let customDangerHex = "customDangerHex"
         // AI / LLM integration
         static let aiEnabled = "aiEnabled"
         static let aiProvider = "aiProvider"
@@ -273,38 +275,51 @@ final class AppSettings: ObservableObject {
     @AppDefault(Keys.customIsDark, default: false)
     var customIsDark: Bool
 
-    @AppDefault(Keys.customPanelHex, default: "#FFFFFF")
+    // Per-token overrides. Each holds a single surface/text color the user has
+    // pinned on top of whatever preset is active. An empty string means "no
+    // override; use the preset's base value", so a fresh install looks exactly
+    // like the chosen preset. Existing users who set colors under the old Custom
+    // flow keep their non-empty hex and are unaffected. Theme.tokens() applies
+    // them in one overlay pass; see applyOverrides there.
+
+    @AppDefault(Keys.customPanelHex, default: "")
     var customPanelHex: String
 
-    @AppDefault(Keys.customScrollBgHex, default: "#F6F8FA")
+    @AppDefault(Keys.customScrollBgHex, default: "")
     var customScrollBgHex: String
 
-    @AppDefault(Keys.customCardSurfaceHex, default: "#FFFFFF")
+    @AppDefault(Keys.customCardSurfaceHex, default: "")
     var customCardSurfaceHex: String
 
-    @AppDefault(Keys.customCardBorderHex, default: "#D0D7DE")
+    @AppDefault(Keys.customCardBorderHex, default: "")
     var customCardBorderHex: String
 
-    @AppDefault(Keys.customHeaderHex, default: "#FFFFFF")
+    @AppDefault(Keys.customHeaderHex, default: "")
     var customHeaderHex: String
 
-    @AppDefault(Keys.customFooterHex, default: "#F6F8FA")
+    @AppDefault(Keys.customFooterHex, default: "")
     var customFooterHex: String
 
-    @AppDefault(Keys.customSidebarHex, default: "#F6F8FA")
+    @AppDefault(Keys.customSidebarHex, default: "")
     var customSidebarHex: String
 
-    @AppDefault(Keys.customScrollbarHex, default: "#AFB8C1")
+    @AppDefault(Keys.customScrollbarHex, default: "")
     var customScrollbarHex: String
 
-    @AppDefault(Keys.customTextPrimaryHex, default: "#1F2328")
+    @AppDefault(Keys.customTextPrimaryHex, default: "")
     var customTextPrimaryHex: String
 
-    @AppDefault(Keys.customTextSecondaryHex, default: "#656D76")
+    @AppDefault(Keys.customTextSecondaryHex, default: "")
     var customTextSecondaryHex: String
 
-    @AppDefault(Keys.customAccentHex, default: "#0969DA")
+    @AppDefault(Keys.customAccentHex, default: "")
     var customAccentHex: String
+
+    @AppDefault(Keys.customSuccessHex, default: "")
+    var customSuccessHex: String
+
+    @AppDefault(Keys.customDangerHex, default: "")
+    var customDangerHex: String
 
     // MARK: - AI / LLM integration
 
@@ -502,39 +517,22 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Methods
 
-    /// Reset every custom-mode color to the Clean Light seed.
-    func resetCustomColors() {
-        let s = Theme.customSeed
-        customPanelHex = s.panel.themeHexString
-        customScrollBgHex = s.scrollBackground.themeHexString
-        customCardSurfaceHex = s.cardSurface.themeHexString
-        customCardBorderHex = s.cardBorder.themeHexString
-        customHeaderHex = s.headerBar.themeHexString
-        customFooterHex = s.footerBar.themeHexString
-        customSidebarHex = s.sidebar.themeHexString
-        customScrollbarHex = s.scrollbar.themeHexString
-        customTextPrimaryHex = s.textPrimary.themeHexString
-        customTextSecondaryHex = s.textSecondary.themeHexString
-        customAccentHex = s.accent.themeHexString
-        customIsDark = false
-    }
-
-    /// Seed the custom palette from whatever named theme is active, so "Custom"
-    /// starts as an editable copy of the user's current look instead of a reset.
-    func seedCustomFromActive() {
-        let t = Theme.tokens(self)
-        customPanelHex = t.panel.themeHexString
-        customScrollBgHex = t.scrollBackground.themeHexString
-        customCardSurfaceHex = t.cardSurface.themeHexString
-        customCardBorderHex = t.cardBorder.themeHexString
-        customHeaderHex = t.headerBar.themeHexString
-        customFooterHex = t.footerBar.themeHexString
-        customSidebarHex = t.sidebar.themeHexString
-        customScrollbarHex = t.scrollbar.themeHexString
-        customTextPrimaryHex = t.textPrimary.themeHexString
-        customTextSecondaryHex = t.textSecondary.themeHexString
-        customAccentHex = t.accent.themeHexString
-        customIsDark = t.isDark
+    /// Clear every per-token override so the app falls back to the selected
+    /// preset's base colors. Used by the "Reset all" affordance.
+    func clearColorOverrides() {
+        customPanelHex = ""
+        customScrollBgHex = ""
+        customCardSurfaceHex = ""
+        customCardBorderHex = ""
+        customHeaderHex = ""
+        customFooterHex = ""
+        customSidebarHex = ""
+        customScrollbarHex = ""
+        customTextPrimaryHex = ""
+        customTextSecondaryHex = ""
+        customAccentHex = ""
+        customSuccessHex = ""
+        customDangerHex = ""
     }
 
     // MARK: - Init
@@ -577,17 +575,21 @@ final class AppSettings: ObservableObject {
             Keys.themePreset: ThemePreset.cleanLight.rawValue,
             Keys.panelOpacity: 1.0,
             Keys.customIsDark: false,
-            Keys.customPanelHex: "#FFFFFF",
-            Keys.customScrollBgHex: "#F6F8FA",
-            Keys.customCardSurfaceHex: "#FFFFFF",
-            Keys.customCardBorderHex: "#D0D7DE",
-            Keys.customHeaderHex: "#FFFFFF",
-            Keys.customFooterHex: "#F6F8FA",
-            Keys.customSidebarHex: "#F6F8FA",
-            Keys.customScrollbarHex: "#AFB8C1",
-            Keys.customTextPrimaryHex: "#1F2328",
-            Keys.customTextSecondaryHex: "#656D76",
-            Keys.customAccentHex: "#0969DA",
+            // Per-token overrides default to "" (no override) so a fresh install
+            // matches the selected preset exactly. See the override props above.
+            Keys.customPanelHex: "",
+            Keys.customScrollBgHex: "",
+            Keys.customCardSurfaceHex: "",
+            Keys.customCardBorderHex: "",
+            Keys.customHeaderHex: "",
+            Keys.customFooterHex: "",
+            Keys.customSidebarHex: "",
+            Keys.customScrollbarHex: "",
+            Keys.customTextPrimaryHex: "",
+            Keys.customTextSecondaryHex: "",
+            Keys.customAccentHex: "",
+            Keys.customSuccessHex: "",
+            Keys.customDangerHex: "",
             Keys.aiEnabled: false,
             Keys.aiProvider: AIProviderKind.ollama.rawValue,
             Keys.aiModel: "",

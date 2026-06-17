@@ -363,6 +363,11 @@ private struct AppearanceSettingsTab: View {
         PanelFontFamily.allCases.filter { $0.isAvailable }
     }
 
+    /// The fully resolved token table (preset base + accent + any overrides).
+    /// Each customize-colors row uses the matching token as its starting value so
+    /// an unset override shows the active theme's color, not a placeholder.
+    private var resolved: ThemeTokens { settings.theme }
+
     var body: some View {
         Form {
             // MARK: Theme
@@ -410,30 +415,31 @@ private struct AppearanceSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            // MARK: Custom colors (only when the Custom theme is selected)
-            if settings.themePreset == .custom {
-                Section("Custom colors") {
-                    customColorRow("Text (primary)", $settings.customTextPrimaryHex)
-                    customColorRow("Text (secondary)", $settings.customTextSecondaryHex)
-                    customColorRow("Accent", $settings.customAccentHex)
-                    customColorRow("Card inner surface", $settings.customCardSurfaceHex)
-                    customColorRow("Card border", $settings.customCardBorderHex)
-                    customColorRow("Scroll area background", $settings.customScrollBgHex)
-                    customColorRow("Panel background", $settings.customPanelHex)
-                    customColorRow("Header bar", $settings.customHeaderHex)
-                    customColorRow("Footer bar", $settings.customFooterHex)
-                    customColorRow("Category sidebar", $settings.customSidebarHex)
-                    // Scrollbars and the text caret are drawn by AppKit and only
-                    // come in light/dark, so they follow this toggle rather than
-                    // an arbitrary hex.
-                    Toggle("Dark scrollbars and caret", isOn: $settings.customIsDark)
-                    HStack {
-                        Button("Copy current theme") { settings.seedCustomFromActive() }
-                        Button("Reset to light") { settings.resetCustomColors() }
-                        Spacer()
-                    }
-                    .padding(.top, 2)
+            // MARK: Customize colors (overrides on top of the active preset)
+            Section {
+                customColorRow("Text (primary)", $settings.customTextPrimaryHex, resolved.textPrimary)
+                customColorRow("Text (secondary)", $settings.customTextSecondaryHex, resolved.textSecondary)
+                customColorRow("Accent", $settings.customAccentHex, resolved.accent)
+                customColorRow("Success", $settings.customSuccessHex, resolved.success)
+                customColorRow("Danger", $settings.customDangerHex, resolved.danger)
+                customColorRow("Card inner surface", $settings.customCardSurfaceHex, resolved.cardSurface)
+                customColorRow("Card border", $settings.customCardBorderHex, resolved.cardBorder)
+                customColorRow("Scroll area background", $settings.customScrollBgHex, resolved.scrollBackground)
+                customColorRow("Panel background", $settings.customPanelHex, resolved.panel)
+                customColorRow("Header bar", $settings.customHeaderHex, resolved.headerBar)
+                customColorRow("Footer bar", $settings.customFooterHex, resolved.footerBar)
+                customColorRow("Category sidebar", $settings.customSidebarHex, resolved.sidebar)
+                HStack {
+                    Button("Reset all overrides") { settings.clearColorOverrides() }
+                    Spacer()
                 }
+                .padding(.top, 2)
+            } header: {
+                Text("Customize colors")
+            } footer: {
+                Text("Overrides apply on top of the selected theme. Clear a row to fall back to that theme's color.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // MARK: Cards
@@ -542,28 +548,40 @@ private struct AppearanceSettingsTab: View {
     }
 
     /// One editable surface color: a hex field plus the macOS color wheel, both
-    /// bound to the same stored hex string so either updates the other.
-    private func customColorRow(_ title: String, _ hex: Binding<String>) -> some View {
-        CustomColorRow(title: title, hex: hex)
+    /// bound to the same stored override hex. `resolved` is the color currently
+    /// shown by the active theme, used as the starting value when no override is set.
+    private func customColorRow(_ title: String, _ hex: Binding<String>, _ resolved: Color) -> some View {
+        CustomColorRow(title: title, hex: hex, resolved: resolved)
     }
 }
 
-/// A hex color field plus the macOS color wheel, both bound to the same stored
-/// hex string. The text field validates on commit (not per keystroke) so an
-/// invalid entry never repaints the app the fallback magenta: a bad value is
-/// rejected and flagged inline instead of being written back to settings.
+/// One per-token override editor: a hex field plus the macOS color wheel, both
+/// writing the same stored override hex, with a reset that clears it. The text
+/// field validates on commit (not per keystroke) so an invalid entry never
+/// repaints the app the fallback magenta: a bad value is rejected and flagged
+/// inline instead of being written back to settings. When the override is empty
+/// the row shows `resolved`, the color the active theme currently renders.
 private struct CustomColorRow: View {
     let title: String
     let hex: Binding<String>
+    /// Active theme's color for this token; shown when no override is set.
+    let resolved: Color
 
     /// Local editable copy so keystrokes do not write straight through to the
     /// stored hex (which would repaint live with partial/invalid input).
     @State private var draft: String = ""
     @State private var isInvalid = false
 
+    /// True when this token has an override pinned (non-empty hex).
+    private var hasOverride: Bool {
+        !hex.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var color: Binding<Color> {
         Binding(
-            get: { Color(themeHex: hex.wrappedValue) },
+            // No override: show the resolved theme color. The wheel then writes
+            // the first edit as a new override.
+            get: { hasOverride ? Color(themeHex: hex.wrappedValue, fallback: resolved) : resolved },
             set: { newColor in
                 let value = newColor.themeHexString
                 hex.wrappedValue = value
@@ -577,14 +595,27 @@ private struct CustomColorRow: View {
         LabeledContent(title) {
             VStack(alignment: .trailing, spacing: 2) {
                 HStack(spacing: 8) {
-                    TextField("#RRGGBB", text: $draft)
+                    TextField(resolved.themeHexString, text: $draft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
                         .frame(width: 92)
-                        .foregroundStyle(isInvalid ? Color.red : Color.primary)
+                        .foregroundStyle(isInvalid ? Color.red : (hasOverride ? Color.primary : Color.secondary))
                         .onSubmit { commit() }
                     ColorPicker("", selection: color, supportsOpacity: false)
                         .labelsHidden()
+                    // Reset clears the override so this token falls back to the
+                    // active theme. Hidden (kept for layout) when nothing to reset.
+                    Button {
+                        hex.wrappedValue = ""
+                        draft = ""
+                        isInvalid = false
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reset to the theme's color")
+                    .disabled(!hasOverride)
+                    .opacity(hasOverride ? 1 : 0.35)
                 }
                 if isInvalid {
                     Text("Enter a hex color like #1F2328.")
@@ -595,7 +626,7 @@ private struct CustomColorRow: View {
         }
         .onAppear { draft = hex.wrappedValue }
         // Keep the field in sync when the stored value changes elsewhere
-        // (color wheel, Copy current theme, Reset to light).
+        // (color wheel, Reset all overrides, per-row reset).
         .onChange(of: hex.wrappedValue) { _, newValue in
             if newValue != draft { draft = newValue; isInvalid = false }
         }
@@ -603,6 +634,12 @@ private struct CustomColorRow: View {
 
     private func commit() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty field clears the override (fall back to the theme color).
+        if trimmed.isEmpty {
+            hex.wrappedValue = ""
+            isInvalid = false
+            return
+        }
         // NSColor(themeHex:) returns nil for anything that is not a valid
         // #RGB/#RRGGBB/#RRGGBBAA value, so it doubles as the validity check.
         guard NSColor(themeHex: trimmed) != nil else {

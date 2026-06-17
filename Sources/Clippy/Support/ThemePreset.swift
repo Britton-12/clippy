@@ -41,6 +41,7 @@ enum ThemePreset: String, CaseIterable, Identifiable {
     case materialDarkPlus
     case nord
     case oneDark
+    case tokyoNight
     case solarizedDark
     case custom
 
@@ -55,6 +56,7 @@ enum ThemePreset: String, CaseIterable, Identifiable {
         case .materialDarkPlus: return "Material Dark+"
         case .nord: return "Nord"
         case .oneDark: return "One Dark"
+        case .tokyoNight: return "Tokyo Night"
         case .solarizedDark: return "Solarized Dark"
         case .custom: return "Custom"
         }
@@ -63,7 +65,7 @@ enum ThemePreset: String, CaseIterable, Identifiable {
     /// Presets shown in the picker, in display order. `.system` and `.custom`
     /// bracket the fixed palettes.
     static var selectable: [ThemePreset] {
-        [.system, .cleanLight, .githubDark, .dracula, .materialDarkPlus, .nord, .oneDark, .solarizedDark, .custom]
+        [.system, .cleanLight, .githubDark, .dracula, .materialDarkPlus, .nord, .oneDark, .tokyoNight, .solarizedDark, .custom]
     }
 
     /// Fixed token table for the palette presets. nil for `.system` and
@@ -115,12 +117,16 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 isDark: true
             )
         case .nord:
+            // Source: nordtheme.com/docs/colors-and-palettes. Polar Night
+            // (nord0-nord3) #2E3440/#3B4252/#434C5E/#4C566A, Snow Storm
+            // #ECEFF4/#D8DEE9, Frost accent nord8 #88C0D0, Aurora #A3BE8C/#BF616A.
+            // #272B35 was never a Nord color; replaced with nord0 #2E3440.
             return ThemeTokens(
-                panel: hex("#2E3440"), scrollBackground: hex("#272B35"),
-                cardSurface: hex("#3B4252"), cardBorder: hex("#4C566A"),
-                headerBar: hex("#272B35"), footerBar: hex("#272B35"),
-                sidebar: hex("#272B35"), scrollbar: hex("#4C566A"),
-                textPrimary: hex("#ECEFF4"), textSecondary: hex("#A9B3C6"),
+                panel: hex("#2E3440"), scrollBackground: hex("#2E3440"),
+                cardSurface: hex("#3B4252"), cardBorder: hex("#434C5E"),
+                headerBar: hex("#3B4252"), footerBar: hex("#3B4252"),
+                sidebar: hex("#2E3440"), scrollbar: hex("#4C566A"),
+                textPrimary: hex("#ECEFF4"), textSecondary: hex("#D8DEE9"),
                 accent: hex("#88C0D0"),
                 success: hex("#A3BE8C"), danger: hex("#BF616A"),
                 isDark: true
@@ -136,6 +142,21 @@ enum ThemePreset: String, CaseIterable, Identifiable {
                 textPrimary: hex("#ABB2BF"), textSecondary: hex("#9299A8"),
                 accent: hex("#61AFEF"),
                 success: hex("#98C379"), danger: hex("#E06C75"),
+                isDark: true
+            )
+        case .tokyoNight:
+            // Source: github.com/enkia/tokyo-night-vscode-theme ("Night" variant,
+            // themes/tokyo-night-color-theme.json). editorPane.background #1A1B26,
+            // sideBar/panel.background #16161E, diff border #292E42, editor fg
+            // #C0CAF5, breadcrumb fg #A9B1D6, blue #7AA2F7, green #9ECE6A, red #F7768E.
+            return ThemeTokens(
+                panel: hex("#1A1B26"), scrollBackground: hex("#16161E"),
+                cardSurface: hex("#24283B"), cardBorder: hex("#292E42"),
+                headerBar: hex("#16161E"), footerBar: hex("#16161E"),
+                sidebar: hex("#16161E"), scrollbar: hex("#414868"),
+                textPrimary: hex("#C0CAF5"), textSecondary: hex("#A9B1D6"),
+                accent: hex("#7AA2F7"),
+                success: hex("#9ECE6A"), danger: hex("#F7768E"),
                 isDark: true
             )
         case .solarizedDark:
@@ -162,21 +183,60 @@ enum ThemePreset: String, CaseIterable, Identifiable {
 enum Theme {
     /// The active token table for the current settings. The single place views
     /// call to learn what color anything should be.
+    ///
+    /// Resolution is base-then-overlay for every preset:
+    ///   1. BASE   - fixedTokens for a named preset, systemTokens for .system,
+    ///               the Clean Light seed for .custom.
+    ///   2. ACCENT - the accent picker (accentTheme) recolors accent on top of
+    ///               the base, so a user can keep GitHub Dark but make selection
+    ///               green. This applies before per-token overrides.
+    ///   3. OVERRIDE - applyOverrides replaces any token whose custom*Hex is
+    ///               non-empty and parses. customAccentHex therefore wins over
+    ///               both the base accent and accentTheme. When every override is
+    ///               empty the result equals the base (plus accentTheme), so the
+    ///               app looks exactly like the chosen preset.
     static func tokens(_ settings: AppSettings) -> ThemeTokens {
+        var base: ThemeTokens
         switch settings.themePreset {
         case .system:
-            return systemTokens(settings)
+            base = systemTokens(settings)
         case .custom:
-            return customTokens(settings)
+            base = customSeed
+            base.isDark = settings.customIsDark
         default:
-            var t = settings.themePreset.fixedTokens ?? systemTokens(settings)
-            // The accent picker still applies on top of any fixed palette so a
-            // user can keep, say, GitHub Dark but recolor selection to green.
-            if settings.accentTheme != .system {
-                t.accent = settings.accentTheme.color
-            }
-            return t
+            base = settings.themePreset.fixedTokens ?? systemTokens(settings)
         }
+        if settings.accentTheme != .system {
+            base.accent = settings.accentTheme.color
+        }
+        return applyOverrides(base, settings)
+    }
+
+    /// Replace each token whose matching custom*Hex override is non-empty and
+    /// parses. An empty or unparseable override leaves the base value untouched,
+    /// so clearing an override (setting its hex to "") restores the preset color.
+    private static func applyOverrides(_ base: ThemeTokens, _ s: AppSettings) -> ThemeTokens {
+        var t = base
+        if let c = override(s.customPanelHex) { t.panel = c }
+        if let c = override(s.customScrollBgHex) { t.scrollBackground = c }
+        if let c = override(s.customCardSurfaceHex) { t.cardSurface = c }
+        if let c = override(s.customCardBorderHex) { t.cardBorder = c }
+        if let c = override(s.customHeaderHex) { t.headerBar = c }
+        if let c = override(s.customFooterHex) { t.footerBar = c }
+        if let c = override(s.customSidebarHex) { t.sidebar = c }
+        if let c = override(s.customScrollbarHex) { t.scrollbar = c }
+        if let c = override(s.customTextPrimaryHex) { t.textPrimary = c }
+        if let c = override(s.customTextSecondaryHex) { t.textSecondary = c }
+        if let c = override(s.customAccentHex) { t.accent = c }
+        if let c = override(s.customSuccessHex) { t.success = c }
+        if let c = override(s.customDangerHex) { t.danger = c }
+        return t
+    }
+
+    /// nil for a blank or unparseable hex, so a missing override falls through to
+    /// the base token instead of repainting the deliberately-ugly fallback magenta.
+    private static func override(_ hex: String) -> Color? {
+        hex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : parseHexColor(hex)
     }
 
     /// NSAppearance to stamp on the window so AppKit-drawn chrome (scrollbars,
@@ -192,30 +252,9 @@ enum Theme {
         }
     }
 
-    /// Default per-surface colors for Custom mode the first time it is opened:
-    /// seed from Clean Light so the user edits a sane starting point.
+    /// Base per-surface colors for the .custom preset: seed from Clean Light so
+    /// the user edits a sane starting point before any override is applied.
     static var customSeed: ThemeTokens { ThemePreset.cleanLight.fixedTokens! }
-
-    private static func customTokens(_ s: AppSettings) -> ThemeTokens {
-        let seed = customSeed
-        return ThemeTokens(
-            panel: Color(themeHex: s.customPanelHex, fallback: seed.panel),
-            scrollBackground: Color(themeHex: s.customScrollBgHex, fallback: seed.scrollBackground),
-            cardSurface: Color(themeHex: s.customCardSurfaceHex, fallback: seed.cardSurface),
-            cardBorder: Color(themeHex: s.customCardBorderHex, fallback: seed.cardBorder),
-            headerBar: Color(themeHex: s.customHeaderHex, fallback: seed.headerBar),
-            footerBar: Color(themeHex: s.customFooterHex, fallback: seed.footerBar),
-            sidebar: Color(themeHex: s.customSidebarHex, fallback: seed.sidebar),
-            scrollbar: Color(themeHex: s.customScrollbarHex, fallback: seed.scrollbar),
-            textPrimary: Color(themeHex: s.customTextPrimaryHex, fallback: seed.textPrimary),
-            textSecondary: Color(themeHex: s.customTextSecondaryHex, fallback: seed.textSecondary),
-            accent: Color(themeHex: s.customAccentHex, fallback: seed.accent),
-            // Semantic success/danger are not user-customizable; fall back to
-            // system semantics so destructive/confirm states stay legible.
-            success: Color(nsColor: .systemGreen), danger: Color(nsColor: .systemRed),
-            isDark: s.customIsDark
-        )
-    }
 
     /// Tokens that track the live macOS appearance using semantic system colors,
     /// with full-contrast label colors (not the washed-out grays the old build
