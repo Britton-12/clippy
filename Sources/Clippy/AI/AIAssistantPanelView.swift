@@ -492,15 +492,16 @@ private struct MessageBubble: View {
                         // whole markdown string on every flush saturates the main thread.
                         // Swap to Markdown once the turn is done (isLive == false).
                         if isLive {
-                            // No text selection while streaming. .textSelection(.enabled)
-                            // installs SwiftUI's SelectionOverlay, which re-runs AppKit text
-                            // layout on every token; that layout invalidation re-enters the
-                            // view-graph transaction and never converges, spinning the main
-                            // thread to 100% CPU with unbounded memory growth. Selection is
-                            // restored the moment the turn ends (the !isLive Markdown branch).
-                            Text(message.text.isEmpty ? " " : message.text)
-                                .font(PanelTypography.body(settings))
-                                .foregroundStyle(tokens.textPrimary)
+                            // Selectable while streaming, but via our own read-only NSTextView
+                            // (not SwiftUI's .textSelection). SwiftUI's SelectionOverlay re-runs
+                            // AppKit text layout per token and re-enters the view-graph transaction
+                            // without converging (100% CPU, runaway memory). An NSTextView lays out
+                            // in AppKit and only re-measures once per token, so it stays flat.
+                            StreamingSelectableText(
+                                text: message.text.isEmpty ? " " : message.text,
+                                font: .systemFont(ofSize: CGFloat(settings.fontSizeBase)),
+                                color: NSColor(tokens.textPrimary)
+                            )
                         } else {
                             Markdown(message.text.isEmpty ? " " : message.text)
                                 .markdownTheme(.clippy(tokens: tokens, settings: settings))
@@ -623,5 +624,52 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+// MARK: - Streaming selectable text
+
+/// A read-only, selectable NSTextView wrapped for SwiftUI. Used for the live
+/// streaming AI bubble so its text is selectable WITHOUT SwiftUI's SelectionOverlay,
+/// which re-enters the view-graph transaction per token and never converges.
+/// AppKit handles selection and lays out once per token, so it stays flat.
+private struct StreamingSelectableText: NSViewRepresentable {
+    let text: String
+    let font: NSFont
+    let color: NSColor
+
+    func makeNSView(context: Context) -> SelfSizingTextView {
+        let tv = SelfSizingTextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.drawsBackground = false
+        tv.textContainerInset = .zero
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.textContainer?.widthTracksTextView = true
+        // Hug content vertically and let the container set the width so text wraps.
+        tv.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return tv
+    }
+
+    func updateNSView(_ tv: SelfSizingTextView, context: Context) {
+        if tv.string != text { tv.string = text }
+        tv.font = font
+        tv.textColor = color
+        // One re-measure per token; no SwiftUI selection overlay is involved.
+        tv.invalidateIntrinsicContentSize()
+    }
+}
+
+/// NSTextView that reports its laid-out height as intrinsic content size so SwiftUI
+/// can size the bubble to the text. Width is driven by the SwiftUI container.
+final class SelfSizingTextView: NSTextView {
+    override var intrinsicContentSize: NSSize {
+        guard let layoutManager, let textContainer else { return super.intrinsicContentSize }
+        layoutManager.ensureLayout(for: textContainer)
+        let height = layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2
+        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(height))
     }
 }
