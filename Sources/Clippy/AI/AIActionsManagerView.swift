@@ -63,15 +63,8 @@ struct AIActionsManagerView: View {
     // MARK: Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "wand.and.sparkles")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.secondary)
-            Text("No actions yet.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView("No actions yet.", systemImage: "wand.and.sparkles")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Action list
