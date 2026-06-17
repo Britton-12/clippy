@@ -300,6 +300,23 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Logging") {
+                Picker("Log level", selection: $settings.logLevel) {
+                    ForEach(ClippyLog.LogLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                .help("Minimum severity written to Console.app and the rotating log file at ~/Library/Application Support/Clippy/Logs. Verbose is loudest; Error is quietest.")
+                .onChange(of: settings.logLevel) { _, level in
+                    // Push the live change to the logger immediately so the new
+                    // threshold takes effect without restarting the app.
+                    ClippyLog.threshold = level
+                }
+                Text("Lower levels capture more detail for diagnosis. Higher levels keep the log quiet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Startup") {
                 Toggle("Launch Clippy at login", isOn: $launchAtLogin)
                     .disabled(!isRunningFromBundle)

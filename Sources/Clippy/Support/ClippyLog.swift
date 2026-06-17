@@ -19,6 +19,41 @@ import os
 
 enum ClippyLog {
 
+    // MARK: - Log level
+
+    /// Severity threshold for both sinks, ordered ascending. Comparable is
+    /// derived from rawValue so `level >= threshold` gates emission.
+    enum LogLevel: Int, Comparable, CaseIterable, Identifiable {
+        case verbose
+        case debug
+        case info
+        case warning
+        case error
+
+        var id: Int { rawValue }
+
+        var label: String {
+            switch self {
+            case .verbose: return "Verbose"
+            case .debug:   return "Debug"
+            case .info:    return "Info"
+            case .warning: return "Warning"
+            case .error:   return "Error"
+            }
+        }
+
+        static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    // Current minimum level both sinks honor. AppSettings sets this from the
+    // stored logLevel at init and on every change, so logging is configurable
+    // without ClippyLog importing AppSettings (avoids a Support->UI cycle and
+    // keeps this enum usable from crash-handler code that runs before settings).
+    // Read on each emit so a live change takes effect immediately.
+    nonisolated(unsafe) static var threshold: LogLevel = .info
+
     // MARK: - os.Logger accessors (one per functional area)
 
     static let lifecycle = Logger(subsystem: "com.bytesavvy.clippy", category: "lifecycle")
@@ -51,18 +86,61 @@ enum ClippyLog {
     // Created lazily on the fileQueue the first time a line is written.
     private static var _handle: FileHandle?
 
-    // MARK: - Public API
+    // MARK: - Public API (leveled)
+
+    static func verbose(_ message: String, category: Logger) {
+        emit(.verbose, message, category: category)
+    }
+
+    static func debug(_ message: String, category: Logger) {
+        emit(.debug, message, category: category)
+    }
 
     /// Write an info-level message to both os.Logger and the file sink.
     static func info(_ message: String, category: Logger) {
-        category.info("\(message, privacy: .public)")
-        fileSink(level: "INFO", message: message)
+        emit(.info, message, category: category)
+    }
+
+    static func warning(_ message: String, category: Logger) {
+        emit(.warning, message, category: category)
     }
 
     /// Write an error-level message to both os.Logger and the file sink.
     static func error(_ message: String, category: Logger) {
-        category.error("\(message, privacy: .public)")
-        fileSink(level: "ERROR", message: message)
+        emit(.error, message, category: category)
+    }
+
+    // MARK: - Gated emit
+
+    /// Single choke point for both sinks. Drops the message entirely when its
+    /// level is below the current threshold, so neither os.Logger nor the file
+    /// is touched. os.Logger level mapping: verbose+debug -> .debug, info ->
+    /// .info, warning -> .warning, error -> .error.
+    static func emit(_ level: LogLevel, _ message: String, category: Logger) {
+        guard level >= threshold else { return }
+
+        switch level {
+        case .verbose, .debug:
+            category.debug("\(message, privacy: .public)")
+        case .info:
+            category.info("\(message, privacy: .public)")
+        case .warning:
+            category.warning("\(message, privacy: .public)")
+        case .error:
+            category.error("\(message, privacy: .public)")
+        }
+
+        fileSink(level: fileTag(level), message: message)
+    }
+
+    private static func fileTag(_ level: LogLevel) -> String {
+        switch level {
+        case .verbose: return "VERBOSE"
+        case .debug:   return "DEBUG"
+        case .info:    return "INFO"
+        case .warning: return "WARN"
+        case .error:   return "ERROR"
+        }
     }
 
     // MARK: - Synchronous flush (for crash handler)
@@ -89,6 +167,20 @@ enum ClippyLog {
             // Last resort: os_log only — cannot recurse into ClippyLog.error here.
             os_log(.fault, "ClippyLog syncWrite failed: %{public}@", error.localizedDescription)
         }
+    }
+
+    // MARK: - Test support
+
+    // The active log file. Exposed so tests can read it back and assert which
+    // levels reached the file sink. Not for production callers.
+    static var logFileURL: URL { logURL }
+
+    // Block until every queued append has run. The file sink is async on a
+    // serial queue, so a test must flush before reading the file or it races
+    // the writer. A sync barrier-style hop is enough: it cannot return until
+    // all previously enqueued async blocks have completed.
+    static func flushForTesting() {
+        fileQueue.sync { }
     }
 
     // MARK: - File sink implementation

@@ -229,7 +229,7 @@ final class ClipStore: ObservableObject {
             try database.updateClipImage(id: id, stored: stored)
             return true
         } catch {
-            NSLog("Clippy: failed to save edited image: \(error)")
+            ClippyLog.error("failed to save edited image: \(error)", category: ClippyLog.storage)
             return false
         }
     }
@@ -247,7 +247,7 @@ final class ClipStore: ObservableObject {
             try database.insertTextClip(text)
             return true
         } catch {
-            NSLog("Clippy: failed to save script output: \(error)")
+            ClippyLog.error("failed to save script output: \(error)", category: ClippyLog.storage)
             return false
         }
     }
@@ -276,12 +276,12 @@ final class ClipStore: ObservableObject {
                     try self.database.insertTextClip(text, sourceAppName: "Clippy OCR")
                     completion("Text extracted and copied to clipboard.")
                 } catch {
-                    NSLog("Clippy: OCR insert failed: \(error)")
+                    ClippyLog.error("OCR insert failed: \(error)", category: ClippyLog.storage)
                     // Clipboard copy succeeded even if the save did not.
                     completion("Text copied to clipboard (save failed).")
                 }
             case .failure(let error):
-                NSLog("Clippy: OCR recognition failed: \(error)")
+                ClippyLog.error("OCR recognition failed: \(error)", category: ClippyLog.storage)
                 completion("Text extraction failed: \(error.localizedDescription)")
             }
         }

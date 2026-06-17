@@ -165,6 +165,8 @@ final class AppSettings: ObservableObject {
         static let hideOnEscape = "hideOnEscape"
         static let panelFloatLevel = "panelFloatLevel"
         static let panelPinned = "panelPinned"
+        // Logging
+        static let logLevel = "logLevel"
     }
 
     private let defaults: UserDefaults
@@ -417,6 +419,17 @@ final class AppSettings: ObservableObject {
     @AppDefault(Keys.panelPinned, default: false)
     var panelPinned: Bool
 
+    // MARK: - Logging
+
+    /// Minimum severity that ClippyLog emits to both sinks. Stored as the
+    /// LogLevel rawValue (Int) via the RawRepresentable @AppDefault init.
+    /// The SettingsView picker pushes changes to ClippyLog.threshold via
+    /// .onChange; init seeds it once at startup. ClippyLog cannot read this
+    /// itself without a Support->UI dependency cycle, so AppSettings is the
+    /// one writer of the threshold.
+    @AppDefault(Keys.logLevel, default: ClippyLog.LogLevel.info)
+    var logLevel: ClippyLog.LogLevel
+
     // MARK: - Properties kept as @Published (clamping or migration logic in init)
     //
     // These cannot be collapsed into @AppDefault because their init reads more
@@ -600,6 +613,7 @@ final class AppSettings: ObservableObject {
             Keys.hideOnEscape: true,
             Keys.panelFloatLevel: PanelFloatLevel.alwaysOnTop.rawValue,
             Keys.panelPinned: false,
+            Keys.logLevel: ClippyLog.LogLevel.info.rawValue,
         ])
 
         // Init loads only the properties that cannot be expressed as a plain
@@ -630,6 +644,11 @@ final class AppSettings: ObservableObject {
             let stored = defaults.integer(forKey: Keys.mcpPort)
             return (stored >= 1024 && stored <= 65535) ? stored : 51764
         }()
+
+        // Seed the logger threshold from the stored level. @AppDefault reads
+        // .standard, which is registered above, so logLevel is valid here.
+        // The SettingsView picker keeps this in sync afterward via .onChange.
+        ClippyLog.threshold = logLevel
     }
 
     /// Resolve the stored sound id, migrating the legacy classic-enum key the
