@@ -48,10 +48,10 @@
     "branch": "feature/clips-files-grid-search-ai",
     "evidence": "docs/evidence/feature-build-test-results.txt",
     "build": "swift build -c debug and -c release both: Build complete!",
-    "tests": "swift test (Xcode-beta toolchain, scratch path): 297 tests, 0 failures (285 prior + 12 new ClipSearchQueryTests).",
+    "tests": "swift test (Xcode-beta toolchain, scratch path): 301 tests, 0 failures (285 prior + 16 new: 12 ClipSearchQueryTests + 4 ClipFileStorageTests).",
     "features": {
       "F_search_grammar": {"status": "verified", "evidence": "12 tests incl. DB-backed #app and #duration filtering; full suite green"},
-      "C_file_clips": {"status": "build-verified", "note": "full suite green confirms migration v6 is safe; GUI capture/paste/move/extract NOT yet observed at runtime"},
+      "C_file_clips": {"status": "verified-storage", "note": "4 storage tests pass (byte copy, persistence, reference-only, dedup) + full suite green confirms migration v6 safe; GUI capture/paste/move/extract NOT yet observed at runtime"},
       "D_column_grid": {"status": "build-verified", "note": "GUI runtime not yet observed"},
       "E_date_buckets": {"status": "build-verified", "note": "pure logic; GUI runtime not yet observed"},
       "A_streaming_selection": {"status": "build-verified", "note": "runtime perf under a heavy stream not yet observed"},
