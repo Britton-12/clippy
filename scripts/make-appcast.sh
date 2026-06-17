@@ -32,7 +32,7 @@ cat > "$OUTPUT" <<APPCAST
             <pubDate>${PUB_DATE}</pubDate>
             <sparkle:version>${VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <link>https://github.com/${REPO_SLUG}/releases/tag/v${VERSION}</link>
             <enclosure
                 url="${DOWNLOAD_URL}"
