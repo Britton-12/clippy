@@ -8,9 +8,18 @@ struct CategorySidePane: View {
     @Binding var selection: PanelSelection
 
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingCategory: Category?
     @State private var isCreating = false
-    /// Category row the cursor is hovering over during a category reorder drag.
+    /// Category row the cursor is currently hovering over during ANY drop drag
+    /// (category reorder or clip filing). A single `.dropDestination(for:
+    /// String.self)` accepts every string, and its isTargeted callback does not
+    /// expose the dragged payload, so the hover indicator cannot branch on token
+    /// type without the payload. One neutral row highlight covers both cases;
+    /// the drop closure resolves the concrete action via routeCategoryRowDrop.
+    /// The insertion-line-vs-highlight split the old kind-filtered destination
+    /// gave for free is not reproducible on a single all-strings destination, so
+    /// a correct highlight beats a payload-guess that would be wrong half the time.
     @State private var draggingOverCategoryID: Int64?
 
     private var tokens: ThemeTokens { settings.theme }
@@ -29,18 +38,9 @@ struct CategorySidePane: View {
                         categoryRow(category)
                             // "cat" kind tag distinguishes category tokens from
                             // clip-reorder tokens ("reorder:clip:<id>"), which
-                            // share the same "reorder:" prefix. The tag lets the
-                            // sidebar clip-filing drop branch by TYPE alone,
-                            // eliminating the id-vs-category value check that
-                            // silently failed when clip.id == category.id.
+                            // share the same "reorder:" prefix. categoryRow owns
+                            // the single drop destination that routes by tag.
                             .reorderDraggable(id: categoryID, kind: "cat")
-                            .reorderDropDestination(
-                                id: categoryID,
-                                kind: "cat",
-                                draggingOver: $draggingOverCategoryID
-                            ) { draggedID, targetID in
-                                store.moveCategory(id: draggedID, beforeCategoryID: targetID)
-                            }
                     }
                     if settings.onePasswordEnabled {
                         onePasswordRow
@@ -116,41 +116,46 @@ struct CategorySidePane: View {
                 store.updateCategory(updated)
             }
         }
-        // Accept clip drops for filing. Category-to-category reorder is handled
-        // by .reorderDraggable/.reorderDropDestination at the ForEach level.
+        // ONE drop destination per category row. SwiftUI drop destinations do
+        // not cascade: a destination that returns false fails the drop, it does
+        // not fall through to a sibling destination. So this single surface must
+        // handle all three token shapes a category row can receive, routing by
+        // PREFIX only (never by comparing the integer id to the category list,
+        // which silently misfired when a clip id equalled a category id):
         //
-        // Payload shapes accepted here — routing is by TAG only, never by
-        // comparing the integer value to the category list:
+        //   "reorder:cat:<n>"   another category row  -> reorder this category
+        //   "clip:<n>"          clip from History     -> file into this category
+        //   "reorder:clip:<n>"  clip from a category  -> file into this category
         //
-        //   "clip:<n>"            clip from the History pane
-        //                         (CategoryReorderModifier, no active category)
+        // routeCategoryRowDrop (pure, unit-tested) decides which action applies.
         //
-        //   "reorder:clip:<n>"    clip from a category pane
-        //                         (CategoryReorderModifier with kind "clip")
-        //
-        // Category-reorder tokens ("reorder:cat:<n>") are NOT listed here and
-        // fall through to return false, allowing the outer reorderDropDestination
-        // (kind "cat") to handle them. This works even when clip.id == category.id
-        // because routing is determined by the kind tag, not the integer value.
+        // A neutral highlight marks the hovered row for any drag-in-progress.
+        .background(
+            draggingOverCategoryID == categoryID
+                ? AnyShapeStyle(tint.opacity(0.22))
+                : AnyShapeStyle(.clear),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12),
+                   value: draggingOverCategoryID)
         .dropDestination(for: String.self) { items, _ in
+            draggingOverCategoryID = nil
             guard let payload = items.first else { return false }
-
-            if payload.hasPrefix("clip:") {
-                // History-pane clip filing: "clip:<n>"
-                guard let clipID = Int64(payload.dropFirst(5)) else { return false }
+            switch routeCategoryRowDrop(payload) {
+            case .reorderCategory(let draggedID):
+                guard draggedID != categoryID else { return false }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                    store.moveCategory(id: draggedID, beforeCategoryID: categoryID)
+                }
+                return true
+            case .fileClip(let clipID):
                 store.fileClip(id: clipID, intoCategory: categoryID)
                 return true
+            case .ignore:
+                return false
             }
-
-            if payload.hasPrefix("reorder:clip:") {
-                // Category-pane clip filing: "reorder:clip:<n>"
-                guard let clipID = Int64(payload.dropFirst(13)) else { return false }
-                store.fileClip(id: clipID, intoCategory: categoryID)
-                return true
-            }
-
-            // "reorder:cat:<n>" and any other payload: not our responsibility.
-            return false
+        } isTargeted: { isOver in
+            draggingOverCategoryID = isOver ? categoryID : nil
         }
         .accessibilityLabel("\(category.name), \(store.clipCount(inCategory: categoryID)) clips")
     }

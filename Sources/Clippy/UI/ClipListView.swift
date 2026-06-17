@@ -505,16 +505,28 @@ struct ClipListView: View {
             draggingOverClipID: $draggingOverClipID,
             store: store
         ))
-        // Normal-precedence taps compose with the .draggable applied by the
-        // modifier above (a tap fires on click-without-move; a drag fires on
-        // press-and-move). highPriorityGesture would block the draggable, so it
-        // is deliberately avoided here.
+        // Tap gestures are attached via .simultaneousGesture so they process at
+        // the SAME priority as, and concurrently with, the .draggable's own drag
+        // gesture instead of competing for recognition. A plain .onTapGesture is
+        // a normal-precedence gesture that competes with the view's gestures, and
+        // on macOS its mouse-down often claims the press before the drag can
+        // begin, so the drag never starts. .simultaneousGesture lets the tap and
+        // the drag both be recognized: a click-without-move fires the tap, a
+        // press-and-move starts the drag.
+        //   Apple docs, "Composing SwiftUI gestures" + simultaneousGesture(_:):
+        //   "they all execute when triggered, rather than competing for
+        //   recognition ... without one preventing the other from executing."
+        //   (developer.apple.com/documentation/swiftui/composing-swiftui-gestures)
+        // highPriorityGesture is deliberately NOT used: it preempts the view's
+        // gestures, which hard-blocks the drag (verified).
         //   Double-click -> paste/activate (configurable primary action)
         //   Cmd-click     -> toggle this clip in the multi-selection
         //   Shift-click   -> extend the multi-selection range from the anchor
-        //   Plain click   -> the card's primary action (select/paste/copy)
-        .onTapGesture(count: 2) { onPrimary(clip) }
-        .onTapGesture {
+        //   Plain click   -> handleRowClick with no modifiers (select)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onPrimary(clip) })
+        .simultaneousGesture(TapGesture(count: 1).onEnded {
+            // NSEvent.modifierFlags reads the live keyboard state at click time;
+            // TapGesture carries no modifier info of its own.
             let mods = NSEvent.modifierFlags
             if mods.contains(.command) {
                 handleRowClick(clip, at: index, modifiers: .command)
@@ -523,7 +535,7 @@ struct ClipListView: View {
             } else {
                 handleRowClick(clip, at: index, modifiers: [])
             }
-        }
+        })
         .contextMenu {
             if selectedClipIDs.count >= 2 {
                 // Batch variants act on the whole multi-selection.

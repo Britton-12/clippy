@@ -67,6 +67,48 @@ private func parseReorderToken(_ token: String, expectedKind: String?) -> String
     }
 }
 
+// MARK: - Category row drop routing
+
+/// The action a category row should take for a dropped payload.
+///
+/// A category row is a single drop surface that receives three distinct token
+/// shapes (all sharing the "reorder:"/"clip:" vocabulary). Routing is by token
+/// PREFIX only -- never by comparing an integer id to the category list, which
+/// silently misfired when a clip id equalled a category id. See DefectB notes
+/// in CategorySidePane.categoryRow.
+enum CategoryRowDrop: Equatable {
+    /// "reorder:cat:<id>" -- another category dragged onto this row. Reorder.
+    case reorderCategory(draggedID: Int64)
+    /// "clip:<id>" (History pane) or "reorder:clip:<id>" (a category pane) --
+    /// a clip dropped onto this row. File it into this category.
+    case fileClip(clipID: Int64)
+    /// Anything else -- not this surface's responsibility; drop returns false.
+    case ignore
+}
+
+/// Pure, testable routing for a category row's unified drop destination.
+///
+/// - payload: the first String item received by `.dropDestination(for:)`.
+/// - Returns: the action to perform. Parsing uses Int64 so non-numeric or
+///   out-of-range ids route to `.ignore` rather than crashing.
+func routeCategoryRowDrop(_ payload: String) -> CategoryRowDrop {
+    // Order matters: "reorder:clip:" must be checked before the bare "clip:"
+    // branch would ever apply, and "reorder:cat:" is its own prefix.
+    if payload.hasPrefix("reorder:cat:") {
+        guard let id = Int64(payload.dropFirst("reorder:cat:".count)) else { return .ignore }
+        return .reorderCategory(draggedID: id)
+    }
+    if payload.hasPrefix("reorder:clip:") {
+        guard let id = Int64(payload.dropFirst("reorder:clip:".count)) else { return .ignore }
+        return .fileClip(clipID: id)
+    }
+    if payload.hasPrefix("clip:") {
+        guard let id = Int64(payload.dropFirst("clip:".count)) else { return .ignore }
+        return .fileClip(clipID: id)
+    }
+    return .ignore
+}
+
 // MARK: - Draggable modifier
 
 struct ReorderDraggableModifier<ID: CustomStringConvertible>: ViewModifier {

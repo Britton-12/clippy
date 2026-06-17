@@ -105,3 +105,57 @@ final class ReorderIDsTests: XCTestCase {
         XCTAssertEqual(result, [1, 2, 3])
     }
 }
+
+// MARK: - Category row drop routing (Defect B)
+
+/// The category row is a SINGLE drop destination that must route three token
+/// shapes by PREFIX. These tests pin that routing so a regression (e.g. routing
+/// by comparing the integer id to the category set, which silently misfired when
+/// a clip id equalled a category id) fails loudly.
+final class CategoryRowDropRoutingTests: XCTestCase {
+
+    func testReorderCatTokenRoutesToReorder() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:cat:7"), .reorderCategory(draggedID: 7))
+    }
+
+    func testHistoryClipTokenRoutesToFile() {
+        XCTAssertEqual(routeCategoryRowDrop("clip:42"), .fileClip(clipID: 42))
+    }
+
+    func testCategoryPaneClipTokenRoutesToFile() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:clip:99"), .fileClip(clipID: 99))
+    }
+
+    /// Critical disambiguation: "reorder:clip:" must NOT be swallowed by the
+    /// bare "clip:" branch, and "reorder:cat:" must not be read as a clip.
+    func testReorderClipIsNotMistakenForCatOrBareClip() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:clip:5"), .fileClip(clipID: 5))
+        XCTAssertEqual(routeCategoryRowDrop("reorder:cat:5"), .reorderCategory(draggedID: 5))
+    }
+
+    /// Same integer value, different tag -> different action. Proves routing is
+    /// by tag, not by value (the bug the kind tags were introduced to kill).
+    func testSameIdDifferentTagRoutesDifferently() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:cat:3"), .reorderCategory(draggedID: 3))
+        XCTAssertEqual(routeCategoryRowDrop("clip:3"), .fileClip(clipID: 3))
+        XCTAssertEqual(routeCategoryRowDrop("reorder:clip:3"), .fileClip(clipID: 3))
+    }
+
+    func testUnknownTokenRoutesToIgnore() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:42"), .ignore)        // no-kind script/AI token
+        XCTAssertEqual(routeCategoryRowDrop("something-else"), .ignore)
+        XCTAssertEqual(routeCategoryRowDrop(""), .ignore)
+    }
+
+    func testNonNumericIdRoutesToIgnore() {
+        XCTAssertEqual(routeCategoryRowDrop("reorder:cat:abc"), .ignore)
+        XCTAssertEqual(routeCategoryRowDrop("clip:"), .ignore)
+        XCTAssertEqual(routeCategoryRowDrop("reorder:clip:x"), .ignore)
+    }
+
+    func testNegativeAndLargeIdsParse() {
+        XCTAssertEqual(routeCategoryRowDrop("clip:-1"), .fileClip(clipID: -1))
+        XCTAssertEqual(routeCategoryRowDrop("reorder:cat:9223372036854775807"),
+                       .reorderCategory(draggedID: Int64.max))
+    }
+}
