@@ -82,9 +82,22 @@ enum AIProviderKind: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .ollama: return "llama3.1"
         case .openai: return "gpt-4o-mini"
-        case .anthropic: return "claude-3-5-haiku-latest"
+        case .anthropic: return "claude-haiku-4-5"
         case .azureFoundry: return "gpt-4o-mini"
         }
+    }
+
+    /// Validate the resolved endpoint before any network call. Returns a precise
+    /// reason string when the endpoint is unusable (e.g. the Azure resource name
+    /// was never filled in), or nil when it is acceptable. Keeping this here means
+    /// every construction site (AIService.fromSettings, the assistant panel) shares
+    /// one authoritative check instead of letting a placeholder host reach DNS.
+    func endpointConfigError(_ baseURL: String) -> String? {
+        guard self == .azureFoundry else { return nil }
+        if baseURL.contains("YOUR-RESOURCE") {
+            return "Azure endpoint not configured. Set your resource Endpoint URL in Settings (e.g. https://my-resource.services.ai.azure.com)."
+        }
+        return nil
     }
 
     /// One-line hint shown under the model field in Settings.
@@ -92,7 +105,7 @@ enum AIProviderKind: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .ollama: return "A model you have pulled, e.g. llama3.1 or qwen2.5."
         case .openai: return "An OpenAI chat model, e.g. gpt-4o-mini."
-        case .anthropic: return "A Claude model id, e.g. claude-3-5-haiku-latest."
+        case .anthropic: return "A Claude model id, e.g. claude-haiku-4-5."
         case .azureFoundry: return "Your Azure deployment name."
         }
     }

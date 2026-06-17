@@ -39,6 +39,9 @@ final class AIService {
         let kind = settings.aiProvider
         let base = settings.aiBaseURL.isEmpty ? kind.defaultBaseURL : settings.aiBaseURL
         let model = settings.aiModel.isEmpty ? kind.defaultModel : settings.aiModel
+        if let why = kind.endpointConfigError(base) {
+            return .failure(.notConfigured(why))
+        }
         var key = ""
         if kind.needsAPIKey {
             key = keychain.read(account: kind.keychainAccount) ?? ""
