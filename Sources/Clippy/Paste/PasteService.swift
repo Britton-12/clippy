@@ -62,6 +62,19 @@ final class PasteService {
         }
     }
 
+    /// Pastes a file clip, optionally using Cmd+Option+V (Finder "Move Item Here")
+    /// instead of Cmd+V. Has no effect when the clip is not a file kind.
+    func pasteFile(_ clip: Clip, move: Bool) {
+        guard clip.contentKind == .file else { return }
+        if !settings.movePastedItemToTop {
+            monitor.ignoreNextChange()
+        }
+        writeToPasteboard(clip, asPlainText: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            move ? Self.sendMoveKeystroke() : Self.sendPasteKeystroke()
+        }
+    }
+
     /// Writes `clip` to the pasteboard without sending Cmd+V. Used by the
     /// copy-only click mode and the keystroke engine (which types the text
     /// directly instead of pasting).
@@ -88,6 +101,10 @@ final class PasteService {
                     pasteboard.setData(tiff, forType: .tiff)
                 }
             }
+        case .file:
+            if let fileURL = resolvedFileURL(for: clip) {
+                (fileURL as NSURL).write(to: pasteboard)
+            }
         case .text:
             if !asPlainText {
                 if let rtf = clip.contentRTF {
@@ -103,6 +120,42 @@ final class PasteService {
         }
     }
 
+    /// Resolves the best available URL for a file clip.
+    /// Prefers the original path when the file still exists; falls back to writing
+    /// the stored bytes to a temp file named after the original display name.
+    private func resolvedFileURL(for clip: Clip) -> URL? {
+        // Prefer the live original.
+        if let path = clip.filePath {
+            let original = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: original.path) {
+                return original
+            }
+        }
+
+        // Fall back to the stored copy: write bytes to a per-session temp file.
+        guard let mediaFilename = clip.mediaFilename else { return nil }
+        let storedURL = ClipDatabase.shared.media.url(for: mediaFilename)
+        guard FileManager.default.fileExists(atPath: storedURL.path),
+              let data = try? Data(contentsOf: storedURL, options: .mappedIfSafe)
+        else { return nil }
+
+        // Use the clip's display name (original filename) as the temp filename
+        // so the receiving app sees a meaningful name rather than the hash.
+        let displayName = clip.filePath.map { URL(fileURLWithPath: $0).lastPathComponent }
+                       ?? clip.contentText
+        let safeName = displayName.isEmpty ? mediaFilename : displayName
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("Clippy", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let tempURL = tempDir.appendingPathComponent(safeName)
+        do {
+            try data.write(to: tempURL, options: .atomic)
+            return tempURL
+        } catch {
+            return nil
+        }
+    }
+
     private static func sendPasteKeystroke() {
         guard AXIsProcessTrusted() else { return }
         let source = CGEventSource(stateID: .combinedSessionState)
@@ -113,6 +166,21 @@ final class PasteService {
         else { return }
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    /// Sends Cmd+Option+V: Finder's "Move Item Here" shortcut.
+    private static func sendMoveKeystroke() {
+        guard AXIsProcessTrusted() else { return }
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let keyCode = CGKeyCode(kVK_ANSI_V)
+        guard
+            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        else { return }
+        keyDown.flags = [.maskCommand, .maskAlternate]
+        keyUp.flags = [.maskCommand, .maskAlternate]
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }

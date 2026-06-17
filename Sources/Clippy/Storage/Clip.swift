@@ -4,6 +4,7 @@ import GRDB
 enum ClipContentKind: String, Codable {
     case text
     case image
+    case file
 }
 
 struct Clip: Identifiable, Equatable, Codable, FetchableRecord, MutablePersistableRecord {
@@ -23,6 +24,8 @@ struct Clip: Identifiable, Equatable, Codable, FetchableRecord, MutablePersistab
     var byteSize: Int?
     /// User-supplied display name. When nil the source app name is shown instead.
     var userTitle: String? = nil
+    /// Original file system path. Populated for file clips only. Nil for text/image clips.
+    var filePath: String? = nil
 
     static let databaseTableName = "clips"
 

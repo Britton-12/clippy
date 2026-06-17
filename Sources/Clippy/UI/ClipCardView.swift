@@ -26,6 +26,14 @@ struct ClipCardView: View {
     /// title and revert to the source app name.
     let onRename: (String?) -> Void
 
+    // MARK: - File-clip action overrides (no-op defaults keep existing callers unchanged)
+    // These let the parent supply custom implementations; when not supplied the
+    // card performs the action itself via its private file-action methods below.
+    let onPasteFile: (() -> Void)?
+    let onMoveFile: (() -> Void)?
+    let onRevealInFinder: (() -> Void)?
+    let onExtractZip: (() -> Void)?
+
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
@@ -54,7 +62,11 @@ struct ClipCardView: View {
         onEdit: @escaping () -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
-        onRename: @escaping (String?) -> Void
+        onRename: @escaping (String?) -> Void,
+        onPasteFile: (() -> Void)? = nil,
+        onMoveFile: (() -> Void)? = nil,
+        onRevealInFinder: (() -> Void)? = nil,
+        onExtractZip: (() -> Void)? = nil
     ) {
         self.clip = clip
         self.isSelected = isSelected
@@ -70,10 +82,15 @@ struct ClipCardView: View {
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
         self.onRename = onRename
+        self.onPasteFile = onPasteFile
+        self.onMoveFile = onMoveFile
+        self.onRevealInFinder = onRevealInFinder
+        self.onExtractZip = onExtractZip
     }
 
     private var kind: ClipKind { clip.kind }
     private var isImage: Bool { clip.contentKind == .image }
+    private var isFile: Bool { clip.contentKind == .file }
 
     private var cardColor: Color {
         // Pinned cards take the category color regardless of the global setting.
@@ -109,6 +126,8 @@ struct ClipCardView: View {
                     headerRow
                     if isImage {
                         imagePreview
+                    } else if isFile {
+                        filePreview
                     } else {
                         Text(clip.previewText)
                             .font(PanelTypography.body(settings))
@@ -156,7 +175,7 @@ struct ClipCardView: View {
     }
 
     private var accessibilitySummary: String {
-        let content = isImage ? "Image" : clip.previewText
+        let content = isImage ? "Image" : isFile ? "File \(clip.contentText)" : clip.previewText
         return "\(clip.displayTitle), \(kind.label), \(content)\(isPinned ? ", pinned" : "")"
     }
 
@@ -293,6 +312,68 @@ struct ClipCardView: View {
         isRenaming = false
     }
 
+    // MARK: - File-clip actions
+
+    /// Resolves the best URL for the file clip: live original first, stored copy second.
+    private var resolvedFileURL: URL? {
+        if let path = clip.filePath {
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        guard let mediaFilename = clip.mediaFilename else { return nil }
+        let stored = ClipDatabase.shared.media.url(for: mediaFilename)
+        return FileManager.default.fileExists(atPath: stored.path) ? stored : nil
+    }
+
+    private func filePasteAction() {
+        if let override = onPasteFile { override(); return }
+        // Paste directly: write the URL to the pasteboard (no keystroke; the
+        // panel dismiss gives focus back, then the user can Cmd+V manually, or
+        // the parent wires a real PasteService call via onPasteFile).
+        guard let url = resolvedFileURL else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        (url as NSURL).write(to: pb)
+    }
+
+    private func fileRevealAction() {
+        if let override = onRevealInFinder { override(); return }
+        guard let url = resolvedFileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func fileMoveAction() {
+        if let override = onMoveFile { override(); return }
+        // Move is only meaningful with Accessibility permission; the parent
+        // should supply onMoveFile wired to PasteService.pasteFile(_:move:true).
+        filePasteAction()
+    }
+
+    private func fileExtractAction() {
+        if let override = onExtractZip { override(); return }
+        guard let archiveURL = resolvedFileURL else { return }
+        let name = archiveURL.deletingPathExtension().lastPathComponent
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+        let destDir = downloads.appendingPathComponent(name, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        } catch { return }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        proc.arguments = ["-x", "-k", archiveURL.path, destDir.path]
+        proc.terminationHandler = { p in
+            DispatchQueue.main.async {
+                if p.terminationStatus == 0 {
+                    NSWorkspace.shared.activateFileViewerSelecting([destDir])
+                }
+                // Failure is silently swallowed; no partial state to clean up.
+            }
+        }
+        try? proc.run()
+    }
+
     private var trailingMetadata: some View {
         HStack(spacing: 6) {
             ForEach(Array(categoryColors.prefix(3).enumerated()), id: \.offset) { _, color in
@@ -328,7 +409,14 @@ struct ClipCardView: View {
 
     private var hoverActions: some View {
         HStack(spacing: 6) {
-            if !isImage {
+            if isFile {
+                // File-clip quick actions: paste (copy), reveal, extract for zips.
+                cardActionButton("arrow.down.to.line", help: "Paste (Copy)", action: filePasteAction)
+                cardActionButton("arrow.up.right.square", help: "Reveal in Finder", action: fileRevealAction)
+                if clip.contentText.lowercased().hasSuffix(".zip") {
+                    cardActionButton("archivebox", help: "Extract", action: fileExtractAction)
+                }
+            } else if !isImage {
                 // "Paste as plain text" is still reachable via the context menu;
                 // this slot is now the quicker "send as keystrokes" action.
                 cardActionButton("keyboard", help: "Send as keystrokes", action: onSendKeystrokes)
@@ -451,6 +539,35 @@ struct ClipCardView: View {
                     .foregroundStyle(tokens.textSecondary)
                     .monospacedDigit()
             }
+        }
+    }
+
+    private var filePreview: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: clip.contentText.hasSuffix(".zip") ? "doc.zipper" : "doc")
+                .font(.system(size: 24, weight: .light))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(kind.tint)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(clip.contentText)
+                    .font(PanelTypography.body(settings))
+                    .lineLimit(2)
+                    .foregroundStyle(tokens.textPrimary)
+                if let byteSize = clip.byteSize {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(byteSize), countStyle: .file))
+                        .font(PanelTypography.micro(settings))
+                        .foregroundStyle(tokens.textSecondary)
+                        .monospacedDigit()
+                }
+                // Reference-only badge: stored bytes not available.
+                if clip.mediaFilename == nil {
+                    Text("Path reference only")
+                        .font(PanelTypography.micro(settings))
+                        .foregroundStyle(tokens.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

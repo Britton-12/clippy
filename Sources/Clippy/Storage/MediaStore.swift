@@ -5,6 +5,7 @@ import Foundation
 enum MediaStoreError: Error {
     case undecodableImage
     case thumbnailFailed
+    case unreadableFile
 }
 
 /// Owns the on-disk directory for image clip payloads and thumbnails.
@@ -16,6 +17,11 @@ final class MediaStore {
         let thumbFilename: String
         let pixelWidth: Int
         let pixelHeight: Int
+        let byteSize: Int
+    }
+
+    struct StoredFile: Equatable {
+        let mediaFilename: String
         let byteSize: Int
     }
 
@@ -55,6 +61,31 @@ final class MediaStore {
             pixelHeight: rep.pixelsHigh,
             byteSize: pngData.count
         )
+    }
+
+    /// Copies the file at `sourceURL` into the media directory using a SHA-256
+    /// content-hash filename so storing the same file twice is idempotent.
+    /// The original extension is preserved (or omitted when absent) so the stored
+    /// copy remains openable by UTType-aware apps.
+    /// Throws `MediaStoreError.unreadableFile` when the source cannot be read.
+    func storeFile(at sourceURL: URL) throws -> StoredFile {
+        let data: Data
+        do {
+            data = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
+        } catch {
+            throw MediaStoreError.unreadableFile
+        }
+        guard !data.isEmpty else { throw MediaStoreError.unreadableFile }
+
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let ext = sourceURL.pathExtension
+        let mediaFilename = ext.isEmpty ? hash : "\(hash).\(ext)"
+        let destURL = url(for: mediaFilename)
+
+        if !FileManager.default.fileExists(atPath: destURL.path) {
+            try data.write(to: destURL, options: .atomic)
+        }
+        return StoredFile(mediaFilename: mediaFilename, byteSize: data.count)
     }
 
     func delete(filenames: [String]) {

@@ -12,6 +12,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// Paste several clips. `combined == true` joins them into one paste;
     /// false pastes them sequentially.
     var onPasteMany: (([Clip], _ combined: Bool, _ asPlainText: Bool) -> Void)?
+    /// Paste a file clip. move == true moves (Cmd+Option+V), false copies (Cmd+V).
+    var onPasteFile: ((Clip, _ move: Bool) -> Void)?
     var onPrimary: ((Clip) -> Void)?
     var onSendKeystrokes: ((Clip) -> Void)?
     var onEdit: ((Clip) -> Void)?
@@ -60,6 +62,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             onPasteMany: { [weak self] clips, combined, asPlainText in
                 self?.onPasteMany?(clips, combined, asPlainText)
             },
+            onPasteFile: { [weak self] clip, move in self?.onPasteFile?(clip, move) },
             onPrimary: { [weak self] clip in self?.onPrimary?(clip) },
             onSendKeystrokes: { [weak self] clip in self?.onSendKeystrokes?(clip) },
             onEdit: { [weak self] clip in self?.onEdit?(clip) },

@@ -115,6 +115,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.pasteService.pasteSequence(clips, asPlainText: asPlainText)
             }
         }
+        panelController.onPasteFile = { [weak self] clip, move in
+            guard let self else { return }
+            let s = AppSettings.shared
+            if s.hideAfterPaste && !s.panelPinned { self.panelController.hide() }
+            self.panelController.restoreFocusToPreviousApp()
+            self.pasteService.pasteFile(clip, move: move)
+        }
         panelController.onPrimary = { [weak self] clip in
             guard let self else { return }
             let s = AppSettings.shared

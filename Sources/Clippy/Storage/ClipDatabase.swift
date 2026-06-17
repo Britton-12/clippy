@@ -163,6 +163,13 @@ final class ClipDatabase {
                 """)
             try db.create(indexOn: "clip_category", columns: ["categoryID", "sortOrder"])
         }
+        migrator.registerMigration("v6-file-clips") { db in
+            // Add the nullable filePath column for file clips. Additive only;
+            // existing text and image rows simply get NULL here.
+            try db.alter(table: "clips") { t in
+                t.add(column: "filePath", .text)
+            }
+        }
         return migrator
     }
 
@@ -179,6 +186,16 @@ final class ClipDatabase {
     /// bumps the timestamp.
     func saveCapturedImageClip(_ clip: inout Clip, cap: Int) throws {
         try upsertCaptured(&clip, cap: cap, matchedBy: Clip.duplicateImage(mediaFilename: clip.mediaFilename))
+    }
+
+    /// Insert a captured file clip. When bytes were stored, the dedupe key is
+    /// the content-hash mediaFilename (same file re-copied bumps the timestamp).
+    /// When only a path reference was kept, the dedupe key is the filePath.
+    func saveCapturedFileClip(_ clip: inout Clip, cap: Int) throws {
+        try upsertCaptured(&clip, cap: cap, matchedBy: Clip.duplicateFile(
+            mediaFilename: clip.mediaFilename,
+            filePath: clip.filePath
+        ))
     }
 
     /// Shared capture body: bump-on-duplicate, else insert + evict over cap, then
@@ -467,5 +484,15 @@ extension Clip {
     /// (a content hash), so a re-copy of the same image bumps rather than duplicates.
     static func duplicateImage(mediaFilename: String?) -> QueryInterfaceRequest<Clip> {
         Clip.filter(Column("mediaFilename") == mediaFilename)
+    }
+
+    /// The capture/import dedupe predicate for a file clip. When bytes are stored,
+    /// match on the content-hash mediaFilename; otherwise match on filePath.
+    static func duplicateFile(mediaFilename: String?, filePath: String?) -> QueryInterfaceRequest<Clip> {
+        let base = Clip.filter(Column("contentKind") == ClipContentKind.file.rawValue)
+        if let mediaFilename {
+            return base.filter(Column("mediaFilename") == mediaFilename)
+        }
+        return base.filter(Column("filePath") == filePath)
     }
 }

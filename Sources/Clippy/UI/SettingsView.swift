@@ -737,6 +737,7 @@ private struct CaptureSettingsTab: View {
             }
 
             Section("Files") {
+                Toggle("Capture copied files", isOn: $settings.captureFiles)
                 Stepper(
                     "Store file contents up to: \(settings.maxFileSizeMB) MB",
                     value: $settings.maxFileSizeMB,

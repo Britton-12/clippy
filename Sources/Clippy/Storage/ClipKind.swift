@@ -8,6 +8,7 @@ enum ClipKind: Equatable {
     case email
     case colorValue(Color)
     case filePath
+    case file
     case image
     case text
 
@@ -47,6 +48,7 @@ enum ClipKind: Equatable {
         case .email: return "envelope"
         case .colorValue: return "paintpalette"
         case .filePath: return "folder"
+        case .file: return "doc"
         case .image: return "photo"
         case .text: return "text.alignleft"
         }
@@ -58,6 +60,7 @@ enum ClipKind: Equatable {
         case .email: return "Email"
         case .colorValue: return "Color"
         case .filePath: return "File path"
+        case .file: return "File"
         case .image: return "Image"
         case .text: return "Text"
         }
@@ -69,6 +72,7 @@ enum ClipKind: Equatable {
         case .email: return Color(nsColor: .systemTeal)
         case .colorValue(let color): return color
         case .filePath: return Color(nsColor: .systemBrown)
+        case .file: return Color(nsColor: .systemOrange)
         case .image: return Color(nsColor: .systemPurple)
         case .text: return Color(nsColor: .systemGray)
         }
@@ -86,6 +90,10 @@ enum ClipKind: Equatable {
 
 extension Clip {
     var kind: ClipKind {
-        contentKind == .image ? .image : ClipKind.detect(contentText)
+        switch contentKind {
+        case .image: return .image
+        case .file: return .file
+        case .text: return ClipKind.detect(contentText)
+        }
     }
 }

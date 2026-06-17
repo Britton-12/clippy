@@ -12,6 +12,9 @@ struct ClipListView: View {
 
     let onPaste: (Clip, Bool) -> Void
     let onPasteMany: ([Clip], Bool, Bool) -> Void
+    /// Paste a file clip. move == true sends Cmd+Option+V (Finder "Move Item
+    /// Here", removing the original); false sends Cmd+V (copy).
+    let onPasteFile: (Clip, Bool) -> Void
     let onPrimary: (Clip) -> Void
     let onSendKeystrokes: (Clip) -> Void
     let onEdit: (Clip) -> Void
@@ -560,7 +563,9 @@ struct ClipListView: View {
             onEdit: { onEdit(clip) },
             onTogglePin: { store.togglePin(clip) },
             onDelete: { requestDelete(clip) },
-            onRename: { store.renameClip(clip, userTitle: $0) }
+            onRename: { store.renameClip(clip, userTitle: $0) },
+            onPasteFile: { onPasteFile(clip, false) },
+            onMoveFile: { onPasteFile(clip, true) }
         )
         .id(clip.id)
         // Drag payload is managed entirely by CategoryReorderModifier so that
@@ -628,6 +633,9 @@ struct ClipListView: View {
                 Button("Delete \(selectedClipIDs.count)", role: .destructive) { requestBatchDelete() }
             } else {
                 Button("Paste") { onPaste(clip, false) }
+                if clip.contentKind == .file {
+                    Button("Move Here (removes original)") { onPasteFile(clip, true) }
+                }
                 if clip.contentKind == .text {
                     Button("Paste as Plain Text") { onPaste(clip, true) }
                     Divider()

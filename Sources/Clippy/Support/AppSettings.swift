@@ -171,6 +171,7 @@ final class AppSettings: ObservableObject {
         // Clip list layout
         static let clipColumns = "clipColumns"
         // File clips
+        static let captureFiles = "captureFiles"
         static let maxFileSizeMB = "maxFileSizeMB"
         // Logging
         static let logLevel = "logLevel"
@@ -241,6 +242,10 @@ final class AppSettings: ObservableObject {
 
     @AppDefault(Keys.maxImageSizeMB, default: 20)
     var maxImageSizeMB: Int
+
+    /// When true, Clippy captures file URLs copied in Finder as file clips.
+    @AppDefault(Keys.captureFiles, default: true)
+    var captureFiles: Bool
 
     /// Largest file (in MB) whose actual bytes are copied into Clippy's local
     /// store. Files larger than this are kept as a path reference only. See the

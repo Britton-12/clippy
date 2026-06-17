@@ -86,6 +86,11 @@ final class ClipboardMonitor {
             return
         }
 
+        // File URLs must be checked before the text path: Finder's copy puts
+        // both a file URL and a display-name string on the pasteboard, and we
+        // want the richer file clip, not a bare filename text clip.
+        if captureFileIfPresent(from: frontApp) { return }
+
         if let text = pasteboard.string(forType: .string),
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             captureText(text, from: frontApp)
@@ -143,6 +148,66 @@ final class ClipboardMonitor {
             else { return }
             try? database.updateClipTitle(id: clipID, userTitle: proposal.proposed)
         }
+    }
+
+    // MARK: - File capture
+
+    /// Returns true when a file clip was captured so the caller can skip text/image.
+    /// Only the first file URL is captured; multi-file selections are not yet supported.
+    @discardableResult
+    private func captureFileIfPresent(from frontApp: NSRunningApplication?) -> Bool {
+        let settings = AppSettings.shared
+        guard settings.captureFiles else { return false }
+
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options)
+                as? [URL],
+              let fileURL = urls.first
+        else { return false }
+
+        // Determine file size without reading the bytes yet.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        guard let attributes else { return false }
+        let fileSize = (attributes[.size] as? Int) ?? 0
+        guard fileSize > 0 else { return false }
+
+        let displayName = fileURL.lastPathComponent
+        let thresholdBytes = settings.maxFileSizeMB * 1_000_000
+
+        do {
+            var mediaFilename: String? = nil
+            var storedByteSize: Int = fileSize
+
+            if fileSize <= thresholdBytes {
+                // Copy bytes into the media store.
+                let stored = try database.media.storeFile(at: fileURL)
+                mediaFilename = stored.mediaFilename
+                storedByteSize = stored.byteSize
+            }
+
+            var clip = Clip(
+                id: nil,
+                contentText: displayName,
+                contentRTF: nil,
+                contentHTML: nil,
+                typeIdentifier: "public.file-url",
+                sourceAppBundleID: frontApp?.bundleIdentifier,
+                sourceAppName: frontApp?.localizedName,
+                createdAt: Date(),
+                contentKind: .file,
+                mediaFilename: mediaFilename,
+                byteSize: storedByteSize
+            )
+            clip.filePath = fileURL.path
+
+            try database.saveCapturedFileClip(&clip, cap: settings.maxHistoryItems)
+            playCaptureSound()
+        } catch {
+            ClippyLog.error("Failed to save file clip: \(error)", category: ClippyLog.capture)
+        }
+        return true
     }
 
     // MARK: - Image capture
