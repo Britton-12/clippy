@@ -146,6 +146,7 @@ final class AppSettings: ObservableObject {
         static let aiAutoSuggestTitles = "aiAutoSuggestTitles"
         static let aiAgentAllowScripts = "aiAgentAllowScripts"
         static let aiAgentAllowCodeExecution = "aiAgentAllowCodeExecution"
+        static let aiAgentAllowWebSearch = "aiAgentAllowWebSearch"
         // 1Password integration
         static let onePasswordEnabled = "onePasswordEnabled"
         static let onePasswordVault = "onePasswordVault"
@@ -360,6 +361,12 @@ final class AppSettings: ObservableObject {
     @AppDefault(Keys.aiAgentAllowCodeExecution, default: false)
     var aiAgentAllowCodeExecution: Bool
 
+    /// When on, the AI assistant may search the web via the web_search tool.
+    /// On by default: it is read-only and the most useful agent capability, but
+    /// note the query string is sent to DuckDuckGo, so it stays user-toggleable.
+    @AppDefault(Keys.aiAgentAllowWebSearch, default: true)
+    var aiAgentAllowWebSearch: Bool
+
     // MARK: - 1Password
 
     /// Show the 1Password vault as a sidebar category. Off by default; requires
@@ -485,7 +492,14 @@ final class AppSettings: ObservableObject {
     /// Preferred localhost port for the bundled MCP HTTP server. Clamped in init
     /// to a valid user-space port (1024-65535).
     @Published var mcpPort: Int {
-        didSet { defaults.set(mcpPort, forKey: Keys.mcpPort) }
+        didSet {
+            // Clamp at the setter, not just at init: a value typed into the
+            // Settings port field at runtime must never reach the socket layer
+            // out of range (UInt16(port) traps for >65535 or <0).
+            let clamped = min(65535, max(1024, mcpPort))
+            if clamped != mcpPort { mcpPort = clamped; return }
+            defaults.set(mcpPort, forKey: Keys.mcpPort)
+        }
     }
 
     // MARK: - Computed properties (not persisted directly)
@@ -598,6 +612,7 @@ final class AppSettings: ObservableObject {
             Keys.aiAutoSuggestTitles: false,
             Keys.aiAgentAllowScripts: false,
             Keys.aiAgentAllowCodeExecution: false,
+            Keys.aiAgentAllowWebSearch: true,
             Keys.onePasswordEnabled: false,
             Keys.onePasswordVault: "Clippy",
             Keys.onePasswordAutoClearClipboard: true,
@@ -656,12 +671,17 @@ final class AppSettings: ObservableObject {
     /// Resolve the stored sound id, migrating the legacy classic-enum key the
     /// previous build wrote ("captureSoundName" = "Tink", "Pop", ...).
     private static func resolveSoundID(_ defaults: UserDefaults) -> String {
+        let candidate: String
         if let id = defaults.string(forKey: Keys.captureSoundID), !id.isEmpty {
-            return id
+            candidate = id
+        } else if let legacy = defaults.string(forKey: Keys.captureSoundName), !legacy.isEmpty {
+            candidate = "system:\(legacy)"
+        } else {
+            candidate = SoundCatalog.defaultID
         }
-        if let legacy = defaults.string(forKey: Keys.captureSoundName), !legacy.isEmpty {
-            return "system:\(legacy)"
-        }
-        return SoundCatalog.defaultID
+        // Reconcile against the live catalog: a sound removed by an OS update or a
+        // deleted custom sound would otherwise leave the picker blank and capture
+        // playback silent. resolvedID falls back to the default for a vanished id.
+        return SoundCatalog.resolvedID(for: candidate)
     }
 }

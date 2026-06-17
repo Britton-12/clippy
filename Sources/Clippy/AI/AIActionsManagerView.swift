@@ -141,7 +141,11 @@ struct AIActionsManagerView: View {
                     .foregroundStyle(.red)
             } else {
                 Button("Restore") {
-                    if let original = AIAction.builtIns.first(where: { $0.id == action.id }) {
+                    if var original = AIAction.builtIns.first(where: { $0.id == action.id }) {
+                        // Keep the action's current position; the built-in template
+                        // carries its original seed sortOrder which would otherwise
+                        // reshuffle a list the user has reordered.
+                        original.sortOrder = action.sortOrder
                         store.update(original)
                     }
                 }

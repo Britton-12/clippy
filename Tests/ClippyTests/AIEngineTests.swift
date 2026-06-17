@@ -585,6 +585,7 @@ final class AIToolRegistryFilteredTests: XCTestCase {
         let registry = AIToolRegistry.makeFiltered(
             allowScripts: false,
             allowCodeExecution: false,
+            allowWebSearch: false,
             confirmHook: { _ in true }
         )
         let names = Set(registry.all.map(\.name))
@@ -603,6 +604,7 @@ final class AIToolRegistryFilteredTests: XCTestCase {
         let registry = AIToolRegistry.makeFiltered(
             allowScripts: true,
             allowCodeExecution: false,
+            allowWebSearch: false,
             confirmHook: { _ in true }
         )
         let names = Set(registry.all.map(\.name))
@@ -616,6 +618,7 @@ final class AIToolRegistryFilteredTests: XCTestCase {
         let registry = AIToolRegistry.makeFiltered(
             allowScripts: false,
             allowCodeExecution: true,
+            allowWebSearch: false,
             confirmHook: { _ in true }
         )
         let names = Set(registry.all.map(\.name))
@@ -623,14 +626,79 @@ final class AIToolRegistryFilteredTests: XCTestCase {
         XCTAssertFalse(names.contains("run_script"))
     }
 
-    /// With both toggles on, all five built-in tools appear.
+    /// With all toggles on, every built-in tool appears.
     func testBothTogglesOnIncludesAllBuiltInTools() {
         let registry = AIToolRegistry.makeFiltered(
             allowScripts: true,
             allowCodeExecution: true,
+            allowWebSearch: true,
             confirmHook: { _ in true }
         )
         let names = Set(registry.all.map(\.name))
-        XCTAssertEqual(names, ["search_clips", "create_clip", "list_scripts", "run_script", "execute_code"])
+        XCTAssertEqual(names, ["search_clips", "create_clip", "web_search", "list_scripts", "run_script", "execute_code"])
+    }
+}
+
+// MARK: - WebSearchTool tests
+
+final class WebSearchToolTests: XCTestCase {
+
+    /// Parse a result with a DDG redirect-wrapped href, HTML entities, and a
+    /// snippet. Proves tag stripping, entity decode, and uddg extraction.
+    func testParsesRedirectAndEntities() {
+        let html = """
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.swift.org%2Fconcurrency&amp;rut=x">Concurrency &amp; Actors</a>
+        <a class="result__snippet" href="//x">Use <b>actors</b> to protect state.</a>
+        """
+        let results = WebSearchTool.parse(html: html)
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].title, "Concurrency & Actors")
+        XCTAssertEqual(results[0].url, "https://docs.swift.org/concurrency")
+        XCTAssertEqual(results[0].snippet, "Use actors to protect state.")
+    }
+
+    func testParseReturnsEmptyOnChallengePage() {
+        // A bot-challenge page has no result anchors; parse must yield nothing.
+        XCTAssertTrue(WebSearchTool.parse(html: "<html><body>nope</body></html>").isEmpty)
+    }
+
+    /// execute() formats injected HTML without touching the network.
+    func testExecuteFormatsInjectedResults() async throws {
+        let canned = "<a class=\"result__a\" href=\"https://example.com\">Example Domain</a>"
+        let tool = WebSearchTool(fetchHTML: { _ in canned })
+        let out = try await tool.execute(args: ["query": "anything"])
+        XCTAssertTrue(out.contains("Example Domain"), "got: \(out)")
+        XCTAssertTrue(out.contains("https://example.com"), "got: \(out)")
+    }
+
+    func testExecuteReportsNoResults() async throws {
+        let tool = WebSearchTool(fetchHTML: { _ in "<html></html>" })
+        let out = try await tool.execute(args: ["query": "zzz"])
+        XCTAssertTrue(out.contains("No web results"), "got: \(out)")
+    }
+
+    func testExecuteRequiresQuery() async throws {
+        let tool = WebSearchTool(fetchHTML: { _ in "" })
+        let out = try await tool.execute(args: [:])
+        XCTAssertTrue(out.contains("query parameter is required"), "got: \(out)")
+    }
+}
+
+// MARK: - ExecuteCodeTool smoke tests
+
+final class ExecuteCodeToolTests: XCTestCase {
+
+    /// Confirms code execution actually runs a subprocess and returns its output.
+    func testRunsConfirmedCode() async throws {
+        let tool = ExecuteCodeTool(confirmHook: { _ in true })
+        let out = try await tool.execute(args: ["language": "zsh", "code": "echo clippy-exec-ok"])
+        XCTAssertTrue(out.contains("clippy-exec-ok"), "got: \(out)")
+    }
+
+    func testDeclinedCodeIsNotRun() async throws {
+        let tool = ExecuteCodeTool(confirmHook: { _ in false })
+        let out = try await tool.execute(args: ["language": "zsh", "code": "echo should-not-run"])
+        XCTAssertTrue(out.contains("declined"), "got: \(out)")
+        XCTAssertFalse(out.contains("should-not-run"), "declined code must not execute")
     }
 }

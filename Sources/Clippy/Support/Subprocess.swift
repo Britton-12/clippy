@@ -14,10 +14,15 @@ enum Subprocess {
         /// On timeout, stderr falls back to "Timed out" when the process produced none,
         /// so callers that read stderr for error messages still get a useful string.
         let timedOut: Bool
-        var succeeded: Bool { exitCode == 0 && !launchFailed }
+        /// True when a stream hit the size ceiling and the child was killed to
+        /// drain the pipe. Output is valid up to the ceiling, so it is not a failure.
+        var truncated: Bool = false
+        // A truncation-kill produces a SIGTERM exit status (non-zero); treat it as
+        // success since the captured output is complete up to the ceiling.
+        var succeeded: Bool { (exitCode == 0 || truncated) && !launchFailed }
     }
 
-    private final class Flag {
+    final class Flag {
         private let lock = NSLock()
         private var value = false
         func set() { lock.lock(); value = true; lock.unlock() }
@@ -31,7 +36,8 @@ enum Subprocess {
     static func readBounded(_ handle: FileHandle,
                             ceiling: Int,
                             truncationMarker: String,
-                            process: Process) -> Data {
+                            process: Process,
+                            truncatedFlag: Flag? = nil) -> Data {
         var accumulated = Data()
         var truncated = false
 
@@ -47,6 +53,7 @@ enum Subprocess {
                 // streams instead of waiting for the process to finish naturally.
                 if process.isRunning { process.terminate() }
                 truncated = true
+                truncatedFlag?.set()
                 break
             }
             // Yield briefly so the OS can schedule the child to produce more data.
@@ -174,10 +181,25 @@ enum Subprocess {
                     return
                 }
 
-                if let input { inPipe.fileHandleForWriting.write(Data(input.utf8)) }
-                try? inPipe.fileHandleForWriting.close()
+                // Feed stdin on a background queue so the child can drain stdout
+                // while we are still writing. A synchronous write here deadlocks
+                // once the input exceeds the ~64KB pipe buffer and the child has
+                // started producing output before consuming all of stdin.
+                let inHandle = inPipe.fileHandleForWriting
+                if let input {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        // write(contentsOf:) throws on EPIPE (child closed stdin
+                        // early) instead of raising, so an early-exiting child
+                        // cannot crash us.
+                        try? inHandle.write(contentsOf: Data(input.utf8))
+                        try? inHandle.close()
+                    }
+                } else {
+                    try? inHandle.close()
+                }
 
                 let timedOut = Flag()
+                let truncatedFlag = Flag()
                 let watchdog = DispatchWorkItem {
                     if process.isRunning { timedOut.set(); process.terminate() }
                 }
@@ -197,13 +219,15 @@ enum Subprocess {
                     errData = Self.readBounded(errPipe.fileHandleForReading,
                                                ceiling: outputCeiling,
                                                truncationMarker: truncationMarker,
-                                               process: process)
+                                               process: process,
+                                               truncatedFlag: truncatedFlag)
                     errDone.signal()
                 }
                 let outData = Self.readBounded(outPipe.fileHandleForReading,
                                                ceiling: outputCeiling,
                                                truncationMarker: truncationMarker,
-                                               process: process)
+                                               process: process,
+                                               truncatedFlag: truncatedFlag)
                 errDone.wait()
                 process.waitUntilExit()
                 watchdog.cancel()
@@ -217,7 +241,8 @@ enum Subprocess {
                     stderr: didTimeOut && rawStderr.isEmpty ? "Timed out" : rawStderr,
                     exitCode: process.terminationStatus,
                     launchFailed: false,
-                    timedOut: didTimeOut))
+                    timedOut: didTimeOut,
+                    truncated: truncatedFlag.isSet))
             }
         }
     }

@@ -32,6 +32,10 @@ private struct TextClipEditor: View {
     @State private var text: String
     @State private var title: String
     @State private var statusMessage: String?
+    /// The action awaiting an instruction (for {instruction} templates).
+    @State private var instructionAction: AIAction?
+    /// The instruction the user types into the prompt.
+    @State private var instructionText: String = ""
 
     private var tokens: ThemeTokens { settings.theme }
 
@@ -84,6 +88,24 @@ private struct TextClipEditor: View {
         .sheet(isPresented: aiSheetBinding) {
             AIActionSheet(runner: ai) { proposal in apply(proposal) }
         }
+        // Instruction prompt for AI actions whose template needs {instruction}.
+        .alert(instructionAction?.name ?? "AI Action",
+               isPresented: Binding(
+                get: { instructionAction != nil },
+                set: { if !$0 { instructionAction = nil } }
+               )) {
+            TextField("Instruction", text: $instructionText)
+            Button("Run") {
+                let trimmed = instructionText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let action = instructionAction, !trimmed.isEmpty {
+                    runActionNow(action, instruction: trimmed)
+                }
+                instructionAction = nil
+            }
+            Button("Cancel", role: .cancel) { instructionAction = nil }
+        } message: {
+            Text(instructionPromptMessage)
+        }
     }
 
     private var aiMenu: some View {
@@ -112,11 +134,41 @@ private struct TextClipEditor: View {
     }
 
     /// Run a store action against the current editor text, mirroring
-    /// ClipListView.runAIAction exactly (AIService.run(action:on:)).
+    /// ClipListView.runAIAction. Suggest Category routes through suggestCategory
+    /// (so it files the clip), and {instruction} templates prompt first.
     private func runAction(_ action: AIAction) {
+        if action.isSuggestCategory {
+            let clipText = text
+            let categoryNames = store.categories.map(\.name)
+            ai.run { service in
+                try await service.suggestCategory(forText: clipText, categories: categoryNames)
+            }
+            return
+        }
+        if action.needsInstruction {
+            instructionAction = action
+            instructionText = ""
+            return
+        }
+        runActionNow(action, instruction: "")
+    }
+
+    /// Execute the action immediately against the current editor text.
+    private func runActionNow(_ action: AIAction, instruction: String) {
         let clipText = text
         ai.run { service in
-            try await service.run(action: action, on: clipText)
+            try await service.run(action: action, on: clipText, instruction: instruction)
+        }
+    }
+
+    /// Tailored prompt copy per built-in, mirroring ClipListView.
+    private var instructionPromptMessage: String {
+        switch instructionAction?.name {
+        case "Translate":     return "Which language should this be translated to?"
+        case "Change Tone":   return "What tone? (e.g. formal, friendly, concise)"
+        case "Rewrite":       return "How should this be rewritten?"
+        case "Generate Clip": return "What should the new clip contain?"
+        default:              return "Enter an instruction for this action."
         }
     }
 
@@ -268,16 +320,16 @@ private struct ImageClipEditor: View {
         HStack(spacing: 6) {
             Button { transform { ImageEditing.rotated($0, byDegrees: -90) } } label: {
                 Image(systemName: "rotate.left")
-            }.help("Rotate left")
+            }.help("Rotate left").accessibilityLabel("Rotate left")
             Button { transform { ImageEditing.rotated($0, byDegrees: 90) } } label: {
                 Image(systemName: "rotate.right")
-            }.help("Rotate right")
+            }.help("Rotate right").accessibilityLabel("Rotate right")
             Button { transform { ImageEditing.flipped($0, horizontal: true) } } label: {
                 Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
-            }.help("Flip horizontal")
+            }.help("Flip horizontal").accessibilityLabel("Flip horizontal")
             Button { transform { ImageEditing.flipped($0, horizontal: false) } } label: {
                 Image(systemName: "arrow.up.and.down.righttriangle.up.righttriangle.down")
-            }.help("Flip vertical")
+            }.help("Flip vertical").accessibilityLabel("Flip vertical")
             Divider().frame(height: 16)
             Toggle(isOn: $cropping) { Label("Crop", systemImage: "crop") }
                 .toggleStyle(.button)

@@ -41,7 +41,8 @@ enum ScriptRunner {
             stderr: output.stderr,
             exitCode: output.exitCode,
             durationMs: Self.ms(since: start),
-            timedOut: output.timedOut)
+            timedOut: output.timedOut,
+            truncated: output.truncated)
     }
 
     private static func ms(since start: Date) -> Int {

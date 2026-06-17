@@ -44,6 +44,11 @@ final class KeystrokeService {
                     let len = utf16.count
                     if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
                        let keyUp   = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) {
+                        // Zero modifier flags: .combinedSessionState folds in live
+                        // hardware modifiers, so a still-held Cmd/Shift (from the
+                        // trigger hotkey) would turn typed characters into shortcuts.
+                        keyDown.flags = []
+                        keyUp.flags = []
                         keyDown.keyboardSetUnicodeString(stringLength: len, unicodeString: &utf16)
                         keyUp.keyboardSetUnicodeString(stringLength: len, unicodeString: &utf16)
                         keyDown.post(tap: .cghidEventTap)
@@ -62,6 +67,10 @@ final class KeystrokeService {
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
             let keyUp   = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         else { return }
+        // Same reason as the unicode path: do not leak live modifier flags into
+        // the synthesized Return/Tab keys.
+        keyDown.flags = []
+        keyUp.flags = []
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }

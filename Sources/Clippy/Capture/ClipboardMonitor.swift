@@ -121,7 +121,7 @@ final class ClipboardMonitor {
             // Sound fires only after a confirmed save; duplicates or DB errors
             // get no feedback. NSSound.play() is async and never blocks here.
             playCaptureSound()
-            maybeAutoSuggestTitle(forText: text)
+            maybeAutoSuggestTitle(forText: text, clipID: clip.id)
         } catch {
             ClippyLog.error("Failed to save clip: \(error)", category: ClippyLog.capture)
         }
@@ -130,18 +130,18 @@ final class ClipboardMonitor {
     /// The one auto-applied agentic action: when enabled, give a freshly captured
     /// text clip an AI-suggested title. Opt-in, detached, and best-effort, so it
     /// never blocks or breaks capture; the title is still user-editable.
-    private func maybeAutoSuggestTitle(forText text: String) {
+    private func maybeAutoSuggestTitle(forText text: String, clipID: Int64?) {
         let settings = AppSettings.shared
-        guard settings.aiEnabled, settings.aiAutoSuggestTitles else { return }
+        guard settings.aiEnabled, settings.aiAutoSuggestTitles, let clipID else { return }
         guard case .success(let service) = AIService.fromSettings() else { return }
         let database = self.database
         Task.detached {
+            // Title the exact row we just inserted. Re-finding by content text
+            // could match a different clip when identical text was captured twice.
             guard let proposal = try? await service.suggestTitle(forText: text),
-                  !proposal.proposed.isEmpty,
-                  let id = (try? database.allClips())?
-                    .first(where: { $0.contentText == text && $0.userTitle == nil })?.id
+                  !proposal.proposed.isEmpty
             else { return }
-            try? database.updateClipTitle(id: id, userTitle: proposal.proposed)
+            try? database.updateClipTitle(id: clipID, userTitle: proposal.proposed)
         }
     }
 

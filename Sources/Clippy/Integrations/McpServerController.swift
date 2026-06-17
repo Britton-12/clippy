@@ -39,7 +39,17 @@ final class McpServerController: ObservableObject {
 
     @Published var status: McpServerStatus = .stopped
 
+    // Serial queue that owns the child-process reference. Every read and write of
+    // `process` and `startInFlight` happens here, so the node process can never be
+    // terminated, leaked, or double-launched by two queues racing. `status` stays
+    // on the main queue (SwiftUI observes it), so we never mutate it from here.
+    private let lifecycleQueue = DispatchQueue(label: "com.bytesavvy.clippy.mcp.lifecycle")
     private var process: Process?
+    // Atomic "a start is already underway" sentinel, guarded by lifecycleQueue.
+    // Set the instant a launch is committed; cleared when the start resolves
+    // (running, failed, port-in-use, or the child exits). This is the real guard
+    // against double-launch, not the async `.starting` status flip.
+    private var startInFlight = false
     private var cancellables = Set<AnyCancellable>()
     private let settings = AppSettings.shared
 
@@ -95,6 +105,10 @@ final class McpServerController: ObservableObject {
         // If our own process is already holding it, report free so start() can no-op.
         if case .running(let p) = status, p == port { return true }
 
+        // Out-of-range ports cannot be bound; report not-free rather than letting
+        // UInt16(port) below trap on an integer overflow and crash the app.
+        guard (1...65535).contains(port) else { return false }
+
         let sock = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard sock != -1 else { return false }
         defer { Darwin.close(sock) }
@@ -118,6 +132,15 @@ final class McpServerController: ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// Release the in-flight start claim on the owning queue. Called from every
+    /// early-return failure path in _start() so a failed launch never wedges the
+    /// sentinel and blocks a later start.
+    private func clearStartInFlight() {
+        lifecycleQueue.async { [weak self] in
+            self?.startInFlight = false
+        }
+    }
+
     func start() {
         if status.isRunning { return }
         if case .starting = status { return }
@@ -125,11 +148,22 @@ final class McpServerController: ObservableObject {
     }
 
     private func _start() {
+        // Atomically claim the start so two near-simultaneous triggers cannot both
+        // launch. The async `.starting` status flip below happens too late to act
+        // as a guard; the synchronous sentinel on lifecycleQueue is the real gate.
+        let claimed = lifecycleQueue.sync { () -> Bool in
+            if startInFlight || process != nil { return false }
+            startInFlight = true
+            return true
+        }
+        guard claimed else { return }
+
         let port = settings.mcpPort
 
         guard let nodePath = McpServerController.findNodeBinary() else {
             let msg = "Node.js not found. Install Node to run the MCP server."
             ClippyLog.error("MCP start failed: \(msg)", category: ClippyLog.mcp)
+            clearStartInFlight()
             DispatchQueue.main.async { [weak self] in
                 self?.status = .failed(msg)
             }
@@ -140,6 +174,7 @@ final class McpServerController: ObservableObject {
             let msg = "MCP server script not found in the app bundle. "
                 + "(Dev builds: run npm run build in integrations/clippy-mcp.)"
             ClippyLog.error("MCP start failed: \(msg)", category: ClippyLog.mcp)
+            clearStartInFlight()
             DispatchQueue.main.async { [weak self] in
                 self?.status = .failed(msg)
             }
@@ -147,6 +182,7 @@ final class McpServerController: ObservableObject {
         }
 
         guard isPortFree(port) else {
+            clearStartInFlight()
             DispatchQueue.main.async { [weak self] in
                 self?.status = .portInUse(port: port)
             }
@@ -182,16 +218,29 @@ final class McpServerController: ObservableObject {
                 stderrLock.unlock()
             },
             onExit: { [weak self] _ in
+                guard let self else { return }
+                // The child is gone: release the process slot and the in-flight
+                // claim on the owning queue so a later start can proceed cleanly.
+                self.lifecycleQueue.async {
+                    self.process = nil
+                    self.startInFlight = false
+                }
                 DispatchQueue.main.async {
                     // Only flip to stopped if we were the one running (not already restarted)
-                    if let self, case .running = self.status {
+                    if case .running = self.status {
                         self.status = .stopped
                     }
                 }
             }
         )
 
-        self.process = proc
+        // Publish the live reference and clear the in-flight claim on the owning
+        // queue. The launch above already started the child; pollHealth only reads
+        // status, so it is safe to dispatch this asynchronously.
+        lifecycleQueue.async { [weak self] in
+            self?.process = proc
+            self?.startInFlight = false
+        }
 
         // Poll /health until the server is up (max ~2.5s with 5 retries).
         // The closure captures stderrLines by reference so the failure diagnostic
@@ -238,16 +287,22 @@ final class McpServerController: ObservableObject {
 
     func stop() {
         ClippyLog.info("MCP server stopping", category: ClippyLog.mcp)
-        process?.terminate()
-        process = nil
+        // Terminate and release the child on its owning queue. Clear any pending
+        // start claim too, so a stop during startup cannot wedge the sentinel.
+        lifecycleQueue.sync {
+            process?.terminate()
+            process = nil
+            startInFlight = false
+        }
         DispatchQueue.main.async { [weak self] in
             self?.status = .stopped
         }
     }
 
     func restart() {
-        // Capture the live process reference before stop() nils it out.
-        let dying = process
+        // Capture the live process reference on the owning queue before stop()
+        // nils it out, so we can wait on the exact child we are replacing.
+        let dying = lifecycleQueue.sync { process }
         stop()
         DispatchQueue.global().async { [weak self] in
             // Wait for the old process to actually exit so the OS reclaims the

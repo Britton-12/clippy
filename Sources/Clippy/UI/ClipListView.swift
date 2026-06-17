@@ -56,6 +56,13 @@ struct ClipListView: View {
     @StateObject private var aiRunner = AIActionRunner()
     /// The clip the AI action is being run against (needed so onApply can write back).
     @State private var aiTargetClip: Clip?
+    /// The action awaiting an instruction from the user (for {instruction} templates).
+    /// Non-nil drives the instruction prompt alert.
+    @State private var aiInstructionAction: AIAction?
+    /// The clip the pending instruction action will run against.
+    @State private var aiInstructionClip: Clip?
+    /// The text the user types into the instruction prompt.
+    @State private var aiInstructionText: String = ""
     /// The clip ID currently being hovered over during a within-category reorder drag.
     /// Shared across all category-section rows so the insertion line can track the target.
     @State private var draggingOverClipID: Int64?
@@ -134,6 +141,28 @@ struct ClipListView: View {
                 handleAIProposal(proposal, for: clip)
                 aiRunner.reset()
             }
+        }
+        // Instruction prompt for AI actions whose template needs {instruction}.
+        .alert(aiInstructionAction?.name ?? "AI Action",
+               isPresented: Binding(
+                get: { aiInstructionAction != nil },
+                set: { if !$0 { aiInstructionAction = nil; aiInstructionClip = nil } }
+               )) {
+            TextField("Instruction", text: $aiInstructionText)
+            Button("Run") {
+                let trimmed = aiInstructionText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let action = aiInstructionAction, let clip = aiInstructionClip, !trimmed.isEmpty {
+                    runAIActionNow(action, on: clip, instruction: trimmed)
+                }
+                aiInstructionAction = nil
+                aiInstructionClip = nil
+            }
+            Button("Cancel", role: .cancel) {
+                aiInstructionAction = nil
+                aiInstructionClip = nil
+            }
+        } message: {
+            Text(aiInstructionPromptMessage)
         }
         // Single confirmation gate for every delete path. The button is marked
         // destructive so it reads red and is not the default action.
@@ -648,10 +677,47 @@ struct ClipListView: View {
     }
 
     private func runAIAction(_ action: AIAction, on clip: Clip) {
+        // Suggest Category must file the clip, not rewrite its body. Route it
+        // through suggestCategory so it yields a .category proposal.
+        if action.isSuggestCategory {
+            aiTargetClip = clip
+            let clipText = clip.contentText
+            let categoryNames = store.categories.map(\.name)
+            aiRunner.run { service in
+                try await service.suggestCategory(forText: clipText, categories: categoryNames)
+            }
+            return
+        }
+        // Actions whose template references {instruction} need the user's input
+        // first; running them blind sends the model a prompt with an empty
+        // instruction (e.g. "Translate the following text to .").
+        if action.needsInstruction {
+            aiInstructionAction = action
+            aiInstructionClip = clip
+            aiInstructionText = ""
+            return
+        }
+        runAIActionNow(action, on: clip, instruction: "")
+    }
+
+    /// Tailored prompt copy per built-in so the field reads naturally
+    /// (e.g. "Which language?" for Translate). Falls back to a generic ask.
+    private var aiInstructionPromptMessage: String {
+        switch aiInstructionAction?.name {
+        case "Translate":    return "Which language should this be translated to?"
+        case "Change Tone":  return "What tone? (e.g. formal, friendly, concise)"
+        case "Rewrite":      return "How should this be rewritten?"
+        case "Generate Clip": return "What should the new clip contain?"
+        default:             return "Enter an instruction for this action."
+        }
+    }
+
+    /// Execute the action immediately with the (possibly empty) instruction.
+    private func runAIActionNow(_ action: AIAction, on clip: Clip, instruction: String) {
         aiTargetClip = clip
         let clipText = clip.contentText
         aiRunner.run { service in
-            try await service.run(action: action, on: clipText)
+            try await service.run(action: action, on: clipText, instruction: instruction)
         }
     }
 
@@ -659,7 +725,18 @@ struct ClipListView: View {
     private func handleAIProposal(_ proposal: AIProposal, for clip: Clip) {
         let text = proposal.proposed
         switch proposal.kind {
-        case .rewrite, .title, .category, .summary:
+        case .category:
+            // Suggested category: file the clip into the matched category,
+            // leaving the clip body untouched. Match by name against the store.
+            if let category = store.categories.first(where: {
+                $0.name.caseInsensitiveCompare(text) == .orderedSame
+            }), let categoryID = category.id, let clipID = clip.id {
+                store.fileClip(id: clipID, intoCategory: categoryID)
+                showStatusBanner("Filed under \"\(category.name)\"")
+            } else {
+                showStatusBanner("No matching category for \"\(text)\"")
+            }
+        case .rewrite, .title, .summary:
             // proposeEdit disposition: overwrite the clip text in-place.
             store.updateText(of: clip, to: text)
         case .newClip:

@@ -191,11 +191,14 @@ final class ClipStore: ObservableObject {
     /// Clips for a category in user-defined sortOrder. Uses the categoryClipOrder
     /// map so the result is instantly consistent with the live observation.
     func clipsForCategory(_ categoryID: Int64) -> [Clip] {
+        // Source from `recents` (every categorized clip, unconditionally) rather
+        // than `clips` (overwritten by FTS search results): otherwise an active
+        // global search query makes category members that do not match the query
+        // vanish from their own category pane.
         guard let orderedIDs = categoryClipOrder[categoryID] else {
-            // Fallback: filter the global clips array before the order map arrives.
-            return clips.filter { membership[$0.id ?? -1]?.contains(categoryID) == true }
+            return recents.filter { membership[$0.id ?? -1]?.contains(categoryID) == true }
         }
-        let clipByID = Dictionary(uniqueKeysWithValues: clips.compactMap { c -> (Int64, Clip)? in
+        let clipByID = Dictionary(uniqueKeysWithValues: recents.compactMap { c -> (Int64, Clip)? in
             guard let id = c.id else { return nil }
             return (id, c)
         })

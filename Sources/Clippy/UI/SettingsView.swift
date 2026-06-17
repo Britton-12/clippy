@@ -765,7 +765,7 @@ private struct CaptureSettingsTab: View {
                 }
                 .disabled(!settings.captureSoundEnabled)
 
-                LabeledContent("Volume: \(settings.captureSoundVolume)%") {
+                LabeledContent("Volume: \(Int(soundVolumeSlider))%") {
                     Slider(
                         value: $soundVolumeSlider,
                         in: 0...100,
@@ -954,6 +954,11 @@ private struct AISettingsTab: View {
             .disabled(!settings.aiEnabled)
 
             Section("Agent and tools") {
+                Toggle("Allow AI to search the web", isOn: $settings.aiAgentAllowWebSearch)
+                    .disabled(!settings.aiEnabled)
+                Text("When on, the AI Assistant can search the web for current information. Your search query is sent to DuckDuckGo. On by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Allow AI to run my scripts", isOn: $settings.aiAgentAllowScripts)
                     .disabled(!settings.aiEnabled)
                 Text("When on, the AI Assistant can list and run your saved scripts. You will be shown a confirmation prompt each time before a script runs.")

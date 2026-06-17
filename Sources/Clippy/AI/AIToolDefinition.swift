@@ -280,6 +280,148 @@ struct ExecuteCodeTool: AITool {
     }
 }
 
+// MARK: web_search
+
+/// Search the web via DuckDuckGo's HTML endpoint and return the top results as
+/// title + URL + snippet. No API key required. The query is sent to DuckDuckGo,
+/// so the tool is gated by its own settings toggle.
+///
+/// The endpoint is POST-only in practice: a GET returns a 202 bot challenge,
+/// while a form POST returns parseable result markup (verified against the live
+/// endpoint). Networking and parsing are split so the parser is unit-tested
+/// without touching the network, and tests inject canned HTML via `fetchHTML`.
+struct WebSearchTool: AITool {
+    let name = "web_search"
+    let description = "Search the web for current information. Returns the top results as title, URL, and a short snippet. Use when the user asks about recent events, documentation, or facts you are unsure of."
+
+    let parametersSchema: [String: Any] = [
+        "type": "object",
+        "properties": [
+            "query": [
+                "type": "string",
+                "description": "The search query.",
+            ] as [String: Any],
+        ] as [String: Any],
+        "required": ["query"],
+    ]
+
+    /// Injected so tests supply canned HTML instead of hitting the network.
+    let fetchHTML: (String) async throws -> String
+
+    init(fetchHTML: @escaping (String) async throws -> String = WebSearchTool.duckDuckGoHTML) {
+        self.fetchHTML = fetchHTML
+    }
+
+    func execute(args: [String: Any]) async throws -> String {
+        guard let query = args["query"] as? String,
+              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Error: query parameter is required."
+        }
+        let html: String
+        do {
+            html = try await fetchHTML(query)
+        } catch {
+            return "Web search failed: \(error.localizedDescription)"
+        }
+        let results = Self.parse(html: html)
+        guard !results.isEmpty else { return "No web results found for \"\(query)\"." }
+        // Explicit String typing: GRDB's `SQL` type is visible module-wide and
+        // conforms to ExpressibleByStringInterpolation, so an unannotated literal
+        // here resolves to SQL instead of String.
+        let body: String = results.prefix(6).enumerated().map { (i, r) -> String in
+            let snippet: String = r.snippet.isEmpty ? "" : "\n   \(r.snippet)"
+            return "\(i + 1). \(r.title)\n   \(r.url)\(snippet)"
+        }.joined(separator: "\n")
+        return AIToolHelpers.truncate(body)
+    }
+
+    // MARK: Networking
+
+    /// POST the query to DuckDuckGo's HTML endpoint and return the raw HTML.
+    static func duckDuckGoHTML(_ query: String) async throws -> String {
+        guard let url = URL(string: "https://html.duckduckgo.com/html/") else {
+            throw AIError.badURL("https://html.duckduckgo.com/html/")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        // DDG rejects an empty User-Agent; a browser UA returns full markup.
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+                         forHTTPHeaderField: "User-Agent")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? query
+        request.httpBody = "q=\(encoded)".data(using: .utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw AIError.http(http.statusCode, "DuckDuckGo returned status \(http.statusCode)")
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    // MARK: Parsing (pure, unit-tested)
+
+    struct WebResult: Equatable {
+        let title: String
+        let url: String
+        let snippet: String
+    }
+
+    static func parse(html: String) -> [WebResult] {
+        let titlePattern = "<a[^>]+class=\"result__a\"[^>]+href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</a>"
+        let snippetPattern = "class=\"result__snippet\"[^>]*>([\\s\\S]*?)</a>"
+        let titleMatches = regexMatches(titlePattern, in: html)
+        let snippetMatches = regexMatches(snippetPattern, in: html)
+        var out: [WebResult] = []
+        for (i, m) in titleMatches.enumerated() where m.count >= 3 {
+            let title = clean(m[2])
+            guard !title.isEmpty else { continue }
+            let url = decodeRedirect(m[1])
+            let snippet = (i < snippetMatches.count && snippetMatches[i].count >= 2)
+                ? clean(snippetMatches[i][1]) : ""
+            out.append(WebResult(title: title, url: url, snippet: snippet))
+        }
+        return out
+    }
+
+    /// Return one array of capture-group strings per match (index 0 is the full
+    /// match); a non-participating group yields "".
+    private static func regexMatches(_ pattern: String, in text: String) -> [[String]] {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        return re.matches(in: text, options: [], range: full).map { match in
+            (0..<match.numberOfRanges).map { i in
+                let r = match.range(at: i)
+                return r.location == NSNotFound ? "" : ns.substring(with: r)
+            }
+        }
+    }
+
+    /// Strip HTML tags, decode the handful of entities DDG emits, collapse runs
+    /// of whitespace.
+    private static func clean(_ raw: String) -> String {
+        var t = raw.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        let entities = ["&amp;": "&", "&#x27;": "'", "&#39;": "'", "&quot;": "\"",
+                        "&lt;": "<", "&gt;": ">", "&nbsp;": " "]
+        for (k, v) in entities { t = t.replacingOccurrences(of: k, with: v) }
+        return t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// DDG wraps external links as `//duckduckgo.com/l/?uddg=<encoded>&rut=...`.
+    /// Pull the real destination back out; pass through already-direct links.
+    private static func decodeRedirect(_ href: String) -> String {
+        var h = href.replacingOccurrences(of: "&amp;", with: "&")
+        if h.hasPrefix("//") { h = "https:" + h }
+        guard h.contains("uddg="),
+              let comps = URLComponents(string: h),
+              let uddg = comps.queryItems?.first(where: { $0.name == "uddg" })?.value else {
+            return h
+        }
+        return uddg
+    }
+}
+
 // MARK: - Default registry factory
 
 extension AIToolRegistry {
@@ -290,6 +432,7 @@ extension AIToolRegistry {
         let registry = AIToolRegistry()
         registry.register(SearchClipsTool())
         registry.register(CreateClipTool())
+        registry.register(WebSearchTool())
         registry.register(ListScriptsTool(scriptStore: .shared))
         registry.register(RunScriptTool(scriptStore: .shared, confirmHook: confirmHook))
         registry.register(ExecuteCodeTool(confirmHook: confirmHook))
@@ -302,11 +445,15 @@ extension AIToolRegistry {
     static func makeFiltered(
         allowScripts: Bool,
         allowCodeExecution: Bool,
+        allowWebSearch: Bool,
         confirmHook: @escaping (String) async -> Bool
     ) -> AIToolRegistry {
         let registry = AIToolRegistry()
         registry.register(SearchClipsTool())
         registry.register(CreateClipTool())
+        if allowWebSearch {
+            registry.register(WebSearchTool())
+        }
         if allowScripts {
             registry.register(ListScriptsTool(scriptStore: .shared))
             registry.register(RunScriptTool(scriptStore: .shared, confirmHook: confirmHook))

@@ -281,6 +281,11 @@ struct CategorySidePane: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { action() }
+        // This row is the primary left-nav control but uses onTapGesture (to keep
+        // drag precedence), so VoiceOver needs the button + selected traits added
+        // explicitly; otherwise it announces a plain label with no role or state.
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .help(help)
     }
 }

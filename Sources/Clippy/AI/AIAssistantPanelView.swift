@@ -90,17 +90,25 @@ final class AIAssistantViewModel: ObservableObject {
         let registry = AIToolRegistry.makeFiltered(
             allowScripts: settings.aiAgentAllowScripts,
             allowCodeExecution: settings.aiAgentAllowCodeExecution,
+            allowWebSearch: settings.aiAgentAllowWebSearch,
             confirmHook: { [weak self] prompt in
                 guard let self else { return false }
                 return await self.askConfirmation(prompt)
             }
         )
 
+        // Diagnostic breadcrumb: records which endpoint/model the turn targets
+        // (never the key) so a failed turn can be traced from the log alone.
+        ClippyLog.debug(
+            "AI send: provider=\(String(describing: kind)) model=\(model) base=\(base) tools=\(registry.all.count) history=\(history.count)",
+            category: ClippyLog.ai)
+
         runningTask = Task { [weak self] in
             guard let self else { return }
             defer { self.state = .ready; self.runningTask = nil }   // ALWAYS resets, kills the freeze class
             var buffer = ""
             var lastFlush = Date()
+            var eventCount = 0
             // Local closure rather than a nested func so it inherits the
             // enclosing Task's main-actor isolation and may mutate `messages`.
             let flush = { @MainActor in
@@ -112,6 +120,7 @@ final class AIAssistantViewModel: ObservableObject {
             do {
                 for try await event in AIAgent.streamWithTools(messages: history, provider: provider, tools: registry.all) {
                     if Task.isCancelled { break }
+                    eventCount += 1
                     switch event {
                     case .textDelta(let t):
                         buffer += t
@@ -126,6 +135,19 @@ final class AIAssistantViewModel: ObservableObject {
                     }
                 }
                 flush()
+                // Fail loud: a stream that ends without producing any text or tool
+                // activity must not leave a blank bubble. A clean (non-throwing)
+                // completion with zero output is itself a failure the user needs to
+                // see, so surface a diagnostic instead of silence.
+                if !Task.isCancelled
+                    && self.messages[assistantIndex].text.isEmpty
+                    && self.messages[assistantIndex].toolActivities.isEmpty {
+                    ClippyLog.error(
+                        "AI stream produced no output (events=\(eventCount), provider=\(String(describing: kind)), model=\(model))",
+                        category: ClippyLog.ai)
+                    self.messages[assistantIndex].text = "The assistant returned an empty response. Check that the model name is correct and that the provider supports streaming, then try again."
+                    self.messages[assistantIndex].isError = true
+                }
             } catch is CancellationError {
                 flush()
             } catch {

@@ -124,6 +124,12 @@ struct ScriptResult: Equatable {
     let exitCode: Int32
     let durationMs: Int
     let timedOut: Bool
+    /// True when output was capped at the size ceiling and the child was killed
+    /// to drain the pipe. The output is valid (just truncated), so this is not a
+    /// failure. Defaults to false so existing construction sites stay compatible.
+    var truncated: Bool = false
 
-    var succeeded: Bool { exitCode == 0 && !timedOut }
+    // A truncation-kill yields a SIGTERM exit status, so exitCode != 0; treat it
+    // as success since the captured output is complete up to the ceiling.
+    var succeeded: Bool { (exitCode == 0 || truncated) && !timedOut }
 }

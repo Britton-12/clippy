@@ -57,6 +57,27 @@ final class ScriptRunnerTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 3)
     }
 
+    func testTruncatedOutputCountsAsSuccess() {
+        // A truncation-kill yields a SIGTERM (non-zero) exit, but the captured
+        // output is valid up to the ceiling, so it must report success.
+        let truncated = ScriptResult(stdout: "x", stderr: "", exitCode: 15,
+                                     durationMs: 1, timedOut: false, truncated: true)
+        XCTAssertTrue(truncated.succeeded)
+        let realFailure = ScriptResult(stdout: "", stderr: "boom", exitCode: 1,
+                                       durationMs: 1, timedOut: false, truncated: false)
+        XCTAssertFalse(realFailure.succeeded)
+    }
+
+    func testLargeStdinDoesNotDeadlock() async {
+        // Regression: stdin larger than the ~64KB pipe buffer used to deadlock
+        // because the synchronous write ran before the output readers started.
+        let big = String(repeating: "a", count: 200_000)
+        let script = Script(name: "cat", interpreter: .zsh, body: "cat")
+        let result = await ScriptRunner.run(script, input: big, timeout: 15)
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.stdout.count, big.count)
+    }
+
     func testReceivesClipOnStdin() async {
         let script = Script(name: "cat", interpreter: .zsh, body: "cat")
         let result = await ScriptRunner.run(script, input: "ping")

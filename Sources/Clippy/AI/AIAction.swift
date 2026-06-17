@@ -95,6 +95,21 @@ extension AIAction: Codable {
 // MARK: - Template rendering
 
 extension AIAction {
+    /// True when the prompt template references `{instruction}`, meaning the UI
+    /// must collect an instruction from the user before running. Built-ins like
+    /// Rewrite, Translate, Change Tone, and Generate Clip would otherwise render
+    /// the placeholder to an empty string and send the model a broken prompt.
+    var needsInstruction: Bool { promptTemplate.contains("{instruction}") }
+
+    /// Stable id of the built-in "Suggest Category" action. The UI routes this
+    /// one through `AIService.suggestCategory` (which yields a `.category`
+    /// proposal that files the clip) instead of the generic `run` path, whose
+    /// `.proposeEdit` disposition would otherwise overwrite the clip body.
+    static let suggestCategoryID = UUID(uuidString: "A1000000-0000-0000-0000-000000000008")!
+
+    /// True when this is the built-in Suggest Category action.
+    var isSuggestCategory: Bool { isBuiltIn && id == Self.suggestCategoryID }
+
     /// Substitute `{clip}` and `{instruction}`, then trim whitespace.
     func buildPrompt(clip: String, instruction: String = "") -> String {
         promptTemplate

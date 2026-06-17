@@ -105,23 +105,17 @@ struct OnePasswordService {
     /// Resolve the op executable. GUI apps receive a stripped PATH, so common
     /// install locations are probed first, then PATH is consulted via /usr/bin/env.
     static func executablePath() -> String? {
+        // A GUI app launched from Finder gets a stripped PATH, so a `/usr/bin/env op`
+        // fallback cannot find op. findBinary checks well-known prefixes, then probes
+        // a login shell's PATH (`which op`) which sees the user's real environment.
         let hardcoded = ["/opt/homebrew/bin/op", "/usr/local/bin/op", "/usr/bin/op"]
-        if let found = hardcoded.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return found
-        }
-        // Fall back to PATH lookup: /usr/bin/env itself is always at a fixed path.
-        if FileManager.default.isExecutableFile(atPath: "/usr/bin/env") {
-            return "/usr/bin/env"
-        }
-        return nil
+        return Subprocess.findBinary(named: "op", candidates: hardcoded)
     }
 
-    /// Arguments to prepend when the resolved path is /usr/bin/env (PATH lookup).
+    /// Resolve the op executable path and the argument list (always an absolute
+    /// path now, so no /usr/bin/env shim is needed).
     private static func opArgs(base: [String]) -> (String, [String]) {
         let path = executablePath() ?? "/opt/homebrew/bin/op"
-        if path == "/usr/bin/env" {
-            return (path, ["op"] + base)
-        }
         return (path, base)
     }
 
