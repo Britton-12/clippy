@@ -439,29 +439,67 @@ struct ClipListView: View {
         return grouped.map { Section(id: $0.title, title: $0.title, rows: $0.rows) }
     }
 
+    // Cached formatters: `sections` recomputes on every view update, so building
+    // a DateFormatter per clip would be wasteful.
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMMM"; return f
+    }()
+    private static let monthYearFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"; return f
+    }()
+
+    /// Maps a clip to its date bucket. Checks run finest-first (day, then week,
+    /// then month) so the result is monotonic as dates descend: clips sorted
+    /// newest-first never produce an out-of-order or duplicated section.
     private func sectionTitle(for clip: Clip) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(clip.createdAt) { return "Today" }
-        if calendar.isDateInYesterday(clip.createdAt) { return "Yesterday" }
-        if let weekAgo = calendar.date(byAdding: .day, value: -7, to: Date()), clip.createdAt > weekAgo {
-            return "This Week"
+        let cal = Calendar.current
+        let now = Date()
+        let date = clip.createdAt
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        // Week buckets precede month buckets.
+        if let thisWeek = cal.dateInterval(of: .weekOfYear, for: now) {
+            if thisWeek.contains(date) { return "This Week" }
+            if let lastWeekDay = cal.date(byAdding: .weekOfYear, value: -1, to: now),
+               let lastWeek = cal.dateInterval(of: .weekOfYear, for: lastWeekDay),
+               lastWeek.contains(date) { return "Last Week" }
         }
-        if let monthAgo = calendar.date(byAdding: .month, value: -1, to: Date()), clip.createdAt > monthAgo {
-            return "This Month"
+        // Month buckets.
+        if let thisMonth = cal.dateInterval(of: .month, for: now) {
+            if thisMonth.contains(date) { return "This Month" }
+            if let lastMonthDay = cal.date(byAdding: .month, value: -1, to: now),
+               let lastMonth = cal.dateInterval(of: .month, for: lastMonthDay),
+               lastMonth.contains(date) { return "Last Month" }
         }
-        return "Earlier"
+        // Older clips: month name, with the year appended outside the current year.
+        if cal.component(.year, from: date) == cal.component(.year, from: now) {
+            return Self.monthFormatter.string(from: date)
+        }
+        return Self.monthYearFormatter.string(from: date)
     }
 
     private var sectionedList: some View {
-        ScrollViewReader { proxy in
+        // 1 = single-column rows (default). 2-4 = card grid filled left-to-right
+        // in reading order (LazyVGrid is row-major).
+        let columns = max(1, min(4, settings.clipColumns))
+        let gridItems = Array(repeating: GridItem(.flexible(), spacing: 6), count: columns)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 6, pinnedViews: []) {
                     ForEach(sections) { section in
                         if !section.title.isEmpty {
                             sectionHeader(section.title)
                         }
-                        ForEach(section.rows, id: \.clip.id) { row in
-                            card(for: row.clip, at: row.index)
+                        if columns > 1 {
+                            LazyVGrid(columns: gridItems, alignment: .leading, spacing: 6) {
+                                ForEach(section.rows, id: \.clip.id) { row in
+                                    card(for: row.clip, at: row.index)
+                                }
+                            }
+                        } else {
+                            ForEach(section.rows, id: \.clip.id) { row in
+                                card(for: row.clip, at: row.index)
+                            }
                         }
                     }
                 }

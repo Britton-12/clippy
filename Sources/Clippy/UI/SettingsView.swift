@@ -452,6 +452,16 @@ private struct AppearanceSettingsTab: View {
                     }
                 }
 
+                Picker("Columns", selection: $settings.clipColumns) {
+                    Text("Single column").tag(1)
+                    ForEach(2...4, id: \.self) { n in
+                        Text("\(n) columns").tag(n)
+                    }
+                }
+                Text("Single column shows wide rows. Two to four columns show a card grid filled left to right.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Picker("Card color", selection: $settings.cardColorMode) {
                     ForEach(CardColorMode.allCases) { mode in
                         Text(mode.label).tag(mode)
@@ -722,6 +732,18 @@ private struct CaptureSettingsTab: View {
                     in: 1...100
                 )
                 Text("Bigger copies are ignored to keep the history database lean.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Files") {
+                Stepper(
+                    "Store file contents up to: \(settings.maxFileSizeMB) MB",
+                    value: $settings.maxFileSizeMB,
+                    in: 1...500,
+                    step: 5
+                )
+                Text("When you copy a file, Clippy keeps its actual contents if the file is at or below this size, so it can be pasted later even if the original moves. Larger files are kept as a reference to their location only. Note: stored file contents are retained locally; avoid copying files with sensitive client data.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

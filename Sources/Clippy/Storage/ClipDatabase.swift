@@ -393,20 +393,57 @@ final class ClipDatabase {
         }
     }
 
+    /// Searches clips with the `#`-token grammar (see ClipQueryParser). Free text
+    /// goes through FTS5; `#app` filters match sourceAppName/bundleID; a `#duration`
+    /// token bounds createdAt. Filter-only queries (no free text) are supported and
+    /// ordered newest-first instead of by FTS rank.
     func searchClips(matching query: String, limit: Int) throws -> [Clip] {
-        guard let pattern = FTS5Pattern(matchingAllPrefixesIn: query) else { return [] }
+        let parsed = ClipQueryParser.parse(query)
         return try dbQueue.read { db in
-            try Clip.fetchAll(
-                db,
-                sql: """
-                    SELECT clips.* FROM clips
-                    JOIN clips_fts ON clips_fts.rowid = clips.id
-                    WHERE clips_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
-                arguments: [pattern, limit]
-            )
+            var clauses: [String] = []
+            var args: [DatabaseValueConvertible] = []
+            var joinFTS = false
+            var orderByRank = false
+
+            if !parsed.text.isEmpty, let pattern = FTS5Pattern(matchingAllPrefixesIn: parsed.text) {
+                joinFTS = true
+                orderByRank = true
+                clauses.append("clips_fts MATCH ?")
+                args.append(pattern)
+            }
+
+            if !parsed.sourceApps.isEmpty {
+                let perApp = parsed.sourceApps.map { _ in
+                    "(clips.sourceAppName LIKE ? OR clips.sourceAppBundleID LIKE ?)"
+                }
+                clauses.append("(" + perApp.joined(separator: " OR ") + ")")
+                for app in parsed.sourceApps {
+                    let like = "%\(app)%"
+                    args.append(like)
+                    args.append(like)
+                }
+            }
+
+            if let since = parsed.since {
+                clauses.append("clips.createdAt >= ?")
+                args.append(since)
+            }
+
+            // No usable predicate (e.g. only an unmatched FTS pattern): fall back to recent.
+            guard !clauses.isEmpty else {
+                return try Clip.order(Column("createdAt").desc, Column("id").desc)
+                    .limit(limit)
+                    .fetchAll(db)
+            }
+
+            var sql = "SELECT clips.* FROM clips"
+            if joinFTS { sql += " JOIN clips_fts ON clips_fts.rowid = clips.id" }
+            sql += " WHERE " + clauses.joined(separator: " AND ")
+            sql += orderByRank ? " ORDER BY rank" : " ORDER BY clips.createdAt DESC, clips.id DESC"
+            sql += " LIMIT ?"
+            args.append(limit)
+
+            return try Clip.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         }
     }
 

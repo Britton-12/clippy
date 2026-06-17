@@ -168,6 +168,10 @@ final class AppSettings: ObservableObject {
         static let hideOnEscape = "hideOnEscape"
         static let panelFloatLevel = "panelFloatLevel"
         static let panelPinned = "panelPinned"
+        // Clip list layout
+        static let clipColumns = "clipColumns"
+        // File clips
+        static let maxFileSizeMB = "maxFileSizeMB"
         // Logging
         static let logLevel = "logLevel"
     }
@@ -238,6 +242,12 @@ final class AppSettings: ObservableObject {
     @AppDefault(Keys.maxImageSizeMB, default: 20)
     var maxImageSizeMB: Int
 
+    /// Largest file (in MB) whose actual bytes are copied into Clippy's local
+    /// store. Files larger than this are kept as a path reference only. See the
+    /// data-sensitivity note in docs: copied bytes are retained locally.
+    @AppDefault(Keys.maxFileSizeMB, default: 50)
+    var maxFileSizeMB: Int
+
     /// Whether to play a sound after each successful clip save. Defaults to
     /// false so existing users hear no change until they opt in.
     @AppDefault(Keys.captureSoundEnabled, default: false)
@@ -261,6 +271,11 @@ final class AppSettings: ObservableObject {
     /// subdued colors, improving contrast on both light and dark backgrounds.
     @AppDefault(Keys.highContrastCardText, default: false)
     var highContrastCardText: Bool
+
+    /// Number of columns in the clip list. 1 = single-column rows (default);
+    /// 2-4 = card grid, filled left-to-right in reading order. Clamped 1...4.
+    @AppDefault(Keys.clipColumns, default: 1)
+    var clipColumns: Int
 
     /// Panel UI font family. .systemDefault uses the system font.
     @AppDefault(Keys.fontFamily, default: PanelFontFamily.systemDefault)
