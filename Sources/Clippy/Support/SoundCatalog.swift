@@ -16,11 +16,25 @@ struct SoundOption: Identifiable, Hashable {
 enum SoundCatalog {
     static let defaultID = "system:Tink"
 
-    /// CoreAudio's UI sounds. Curated to the short, pleasant ones that read as a
-    /// capture confirmation; the telephony/DTMF/busy tones in the same tree are
-    /// deliberately excluded.
+    /// Root of CoreAudio's bundled UI sounds. The whole tree is enumerated (see
+    /// build()); the curated list below just hoists the best capture-confirmation
+    /// candidates into a highlights group at the top of the picker.
     private static let coreAudioBase =
         "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds"
+
+    /// Subfolder -> picker group label for the full CoreAudio enumeration.
+    /// "system" maps to "System UI" so it does not collide with the
+    /// /System/Library/Sounds "System" group.
+    private static let coreAudioGroupLabels: [String: String] = [
+        "accessibility": "Accessibility",
+        "dock": "Dock",
+        "facetime": "FaceTime",
+        "finder": "Finder",
+        "ink": "Ink",
+        "siri": "Siri",
+        "system": "System UI",
+        "telephony": "Telephony",
+    ]
 
     private static let curatedModern: [(label: String, relativePath: String)] = [
         ("Sent Message", "system/SentMessage.caf"),
@@ -67,12 +81,42 @@ enum SoundCatalog {
             result.append(SoundOption(id: "system:\(sound.rawValue)", label: sound.label, group: "Classic"))
         }
 
-        // Modern notification / UI sounds, included only if present on disk.
         let fm = FileManager.default
+
+        // Every remaining alert sound shipped in /System/Library/Sounds. These
+        // are name-resolvable via NSSound(named:), so they share the "system:"
+        // scheme. The curated Classic names above already cover the stock set;
+        // de-duping by id keeps a name that lands in both groups out of System,
+        // and any extra sounds a future OS adds show up here without a code change.
+        let systemSoundsDir = "/System/Library/Sounds"
+        let systemNames = (try? fm.contentsOfDirectory(atPath: systemSoundsDir)) ?? []
+        for file in systemNames.sorted() where isSoundFile(file) {
+            let base = (file as NSString).deletingPathExtension
+            let id = "system:\(base)"
+            guard !result.contains(where: { $0.id == id }) else { continue }
+            result.append(SoundOption(id: id, label: base, group: "System"))
+        }
+
+        // Modern notification / UI sounds, included only if present on disk.
         for entry in curatedModern {
             let path = "\(coreAudioBase)/\(entry.relativePath)"
             if fm.fileExists(atPath: path) {
                 result.append(SoundOption(id: "file:\(path)", label: entry.label, group: "Notification & UI"))
+            }
+        }
+
+        // The full CoreAudio SystemSounds tree, one group per subfolder. Dedup by
+        // id keeps the curated highlights above from reappearing in their category
+        // group. The curated entries use the same file:<abspath> id scheme, so a
+        // highlighted sound is matched and skipped here.
+        for (subfolder, group) in coreAudioGroupLabels.sorted(by: { $0.key < $1.key }) {
+            let dir = "\(coreAudioBase)/\(subfolder)"
+            let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+            for file in names.sorted() where isSoundFile(file) {
+                let id = "file:\(dir)/\(file)"
+                guard !result.contains(where: { $0.id == id }) else { continue }
+                let base = (file as NSString).deletingPathExtension
+                result.append(SoundOption(id: id, label: readableLabel(from: base), group: group))
             }
         }
 
@@ -102,6 +146,20 @@ enum SoundCatalog {
     private static func isSoundFile(_ name: String) -> Bool {
         let ext = (name as NSString).pathExtension.lowercased()
         return ["aiff", "aif", "caf", "wav", "m4a", "mp3", "aifc"].contains(ext)
+    }
+
+    /// Turns a raw filename stem into a picker label: underscores and hyphens
+    /// become spaces, runs of whitespace collapse, and each word is title-cased.
+    /// Deterministic and lossless for already-readable names ("move to trash" ->
+    /// "Move to Trash"); leaves acronym-ish stems alone beyond first-letter case
+    /// ("jbl_begin" -> "Jbl Begin").
+    private static func readableLabel(from stem: String) -> String {
+        let spaced = stem.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        let words = spaced.split(whereSeparator: { $0 == " " || $0 == "\t" })
+        return words
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 }
 
