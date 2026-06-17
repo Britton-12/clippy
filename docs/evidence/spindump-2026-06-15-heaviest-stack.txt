@@ -1,0 +1,58 @@
+### SOURCE: /Library/Logs/DiagnosticReports/Clippy_2026-06-15-194450_JMMBPM5-10.cpu_resource.diag
+### Captured: 2026-06-17 02:37:37 -0400
+
+Date/Time:        2026-06-15 19:43:07.388 -0400
+Path:             /Applications/Clippy.app/Contents/MacOS/Clippy
+Version:          1.4.0 (1.4.0)
+Event:            cpu usage
+CPU:              90 seconds cpu time over 103 seconds (88% cpu average), exceeding limit of 50% cpu over 180 seconds
+Path:             /Applications/Clippy.app/Contents/MacOS/Clippy
+Version:          1.4.0 (1.4.0)
+Footprint:        147.16 MB -> 2105.73 MB (+1958.58 MB)
+Note:             Unresponsive
+Num threads:      1
+
+=== Heaviest stack for the target process ===
+Heaviest stack for the target process:
+  31  start + 6992 (dyld + 130560) [0x18b2f3e00]
+  31  Clippy_main + 140 (Clippy + 107988) [0x1021965d4]
+  31  -[NSApplication run] + 368 (AppKit + 180540) [0x18fb8f13c]
+  31  -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72 (AppKit + 12379580) [0x1907315bc]
+  31  -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688 (AppKit + 12380336) [0x1907318b0]
+  31  _DPSNextEvent + 576 (AppKit + 233604) [0x18fb9c084]
+  31  _DPSBlockUntilNextEventMatchingListInMode + 228 (AppKit + 7230300) [0x19024835c]
+  31  _BlockUntilNextEventMatchingListInMode + 48 (HIToolbox + 2400588) [0x1986e014c]
+  31  ReceiveNextEventCommon + 272 (HIToolbox + 788452) [0x1985567e4]
+  31  RunCurrentEventLoopInMode + 320 (HIToolbox + 775520) [0x198553560]
+  31  _CFRunLoopRunSpecificWithOptions + 588 (CoreFoundation + 1372668) [0x18b8401fc]
+  31  __CFRunLoopDoObservers + 648 (CoreFoundation + 512528) [0x18b76e210]
+  31  __CFRUNLOOP_IS_CALLING_OUT_TO_AN_OBSERVER_CALLBACK_FUNCTION__ + 36 (CoreFoundation + 512788) [0x18b76e314]
+  31  @objc closure #1 in static NSRunLoop.addObserver(_:) + 28 (SwiftUICore + 13403148) [0x238f7340c]
+  31  specialized static NSRunLoop.flushObservers() + 396 (SwiftUICore + 13404432) [0x238f73910]
+  31  <deduplicated_symbol> + 28 (SwiftUICore + 4552836) [0x238702884]
+  31  partial apply for closure #1 in closure #1 in NSHostingView.beginTransaction() + 80 (SwiftUI + 8997424) [0x1c0c63a30]
+  31  static Update.ensure<A>(_:) + 100 (SwiftUICore + 5540336) [0x2387f39f0]
+  31  closure #1 in static Update.ensure<A>(_:) + 56 (SwiftUICore + 5546248) [0x2387f5108]
+  31  partial apply for closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 24 (SwiftUI + 8997464) [0x1c0c63a58]
+  31  closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 172 (SwiftUI + 8942244) [0x1c0c562a4]
+  31  ViewGraphRootValueUpdater.updateGraph<A>(body:) + 180 (SwiftUICore + 13840368) [0x238fddff0]
+  31  ViewGraphRootValueUpdater._updateViewGraph<A>(body:) + 232 (SwiftUICore + 13847240) [0x238fdfac8]
+  31  partial apply for closure #1 in ViewGraphRootValueUpdater.updateGraph<A>(body:) + 28 (SwiftUICore + 13861856) [0x238fe33e0]
+  31  closure #1 in closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 24 (SwiftUI + 8942300) [0x1c0c562dc]
+  31  GraphHost.flushTransactions() + 180 (SwiftUICore + 8157024) [0x238a72760]
+  28  specialized GraphHost.runTransaction(_:do:id:) + 368 (SwiftUICore + 8275872) [0x238a8f7a0]
+  28  AG::Subgraph::update(unsigned int) + 972 (AttributeGraph + 117848) [0x1c1b35c58]
+  27  AG::Graph::UpdateStack::update() + 496 (AttributeGraph + 54148) [0x1c1b26384]
+  7   partial apply for implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:) + 32 (SwiftUICore + 2423512) [0x2384faad8]
+  5   closure #1 in PlatformViewChild.updateValue() + 5484 (SwiftUICore + 2580916) [0x2385211b4]
+  5   closure #1 in closure #7 in closure #1 in PlatformViewChild.updateValue() + 764 (SwiftUICore + 2588244) [0x238522e54]
+  5   ViewRendererHost.performExternalUpdate(_:) + 284 (SwiftUICore + 13841368) [0x238fde3d8]
+  5   closure #1 in closure #1 in closure #7 in closure #1 in PlatformViewChild.updateValue() + 876 (SwiftUICore + 2589252) [0x238523244]
+  5   PlatformViewRepresentableAdaptor.updateViewProvider(_:context:) + 448 (SwiftUI + 7199528) [0x1c0aacb28]
+  5   protocol witness for NSViewRepresentable.updateNSView(_:context:) in conformance SelectionOverlay + 52 (SwiftUI + 6050720) [0x1c09943a0]
+  2   SelectionOverlay.updateNSView(_:context:) + 848 (SwiftUI + 6044592) [0x1c0992bb0]
+  1   specialized FallbackAlignmentProvider<>.update(in:axis:) + 1416 (SwiftUI + 6047768) [0x1c0993818]
+  1   _CFRelease + 216 (CoreFoundation + 1379964) [0x18b841e7c]
+
+
+Powerstats for:   Clippy [94368] [unique pid 3349399]

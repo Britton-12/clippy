@@ -492,10 +492,15 @@ private struct MessageBubble: View {
                         // whole markdown string on every flush saturates the main thread.
                         // Swap to Markdown once the turn is done (isLive == false).
                         if isLive {
+                            // No text selection while streaming. .textSelection(.enabled)
+                            // installs SwiftUI's SelectionOverlay, which re-runs AppKit text
+                            // layout on every token; that layout invalidation re-enters the
+                            // view-graph transaction and never converges, spinning the main
+                            // thread to 100% CPU with unbounded memory growth. Selection is
+                            // restored the moment the turn ends (the !isLive Markdown branch).
                             Text(message.text.isEmpty ? " " : message.text)
                                 .font(PanelTypography.body(settings))
                                 .foregroundStyle(tokens.textPrimary)
-                                .textSelection(.enabled)
                         } else {
                             Markdown(message.text.isEmpty ? " " : message.text)
                                 .markdownTheme(.clippy(tokens: tokens, settings: settings))
@@ -506,7 +511,9 @@ private struct MessageBubble: View {
                             .foregroundStyle(tokens.isDark ? Color.white : Color(nsColor: .labelColor).opacity(0.9))
                     }
                 }
-                .textSelection(.enabled)
+                // Selection stays off for the live (streaming) assistant bubble; see the
+                // isLive branch above. Static bubbles (user, error, finished assistant) keep it.
+                .textSelectionEnabled(!isLive)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(
@@ -600,5 +607,21 @@ private struct InlineConfirmationCard: View {
         .background(tokens.panel, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(tokens.cardBorder, lineWidth: 1))
         .shadow(radius: 20)
+    }
+}
+
+// MARK: - Conditional text selection
+
+private extension View {
+    /// Enables text selection only when `enabled` is true. When false the view is
+    /// returned unmodified so SwiftUI never installs its SelectionOverlay, keeping
+    /// the rapidly-mutating streaming bubble out of the AppKit text-layout path.
+    @ViewBuilder
+    func textSelectionEnabled(_ enabled: Bool) -> some View {
+        if enabled {
+            self.textSelection(.enabled)
+        } else {
+            self
+        }
     }
 }

@@ -1,0 +1,47 @@
+{
+  "run": "ai-assistant-freeze-diagnosis",
+  "date": "2026-06-17",
+  "scope": "Diagnose why the AI assistant caused Clippy to lock up (100% CPU, ~2GB RAM, force-quit). Diagnosis only; no fix applied.",
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Streaming AI bubble uses .textSelection(.enabled) on live-mutating Text, causing a non-converging SwiftUI AttributeGraph update loop on the main thread",
+      "type": "root-cause",
+      "severity": "high",
+      "culprit": "Sources/Clippy/AI/AIAssistantPanelView.swift:498 (live Text) and :509 (wrapping Group); spinner at :394; text appended per token at :116",
+      "mechanism": "Each streamed token mutates @Published messages[i].text (:116) -> SwiftUI rebuilds the selectable Text -> SelectionOverlay.updateNSView recomputes AppKit text geometry (setFont / NSAttributedString.replacingLineBreakModes) -> AppKit layout invalidation re-enters the AttributeGraph transaction (NSHostingView.beginTransaction -> GraphHost.flushTransactions -> AG::Subgraph::update -> PlatformViewRepresentableAdaptor.updateViewProvider) -> never reaches a fixed point while tokens arrive -> main thread pinned ~100%, run loop never completes, footprint grows unbounded.",
+      "evidence": [
+        "docs/evidence/spindump-2026-06-15-heaviest-stack.txt (Footprint 147->2105 MB, Unresponsive, 1 thread, 88% CPU, leaf SelectionOverlay.updateNSView)",
+        "docs/evidence/spindump-2026-06-16-heaviest-stack.txt (Footprint 100->1611 MB, Unresponsive, 1 thread, 96% CPU, leaf SelectionOverlay.updateNSView -> setFont)",
+        "docs/evidence/unified-log-ollama-stream-2026-06-17.txt (freeze session: Ollama :11434 turns C45 55.96s + C46 64.68s/48.9KB cancelled 02:23:09 at force-quit; Clippy log volume collapses after 02:22)",
+        "docs/evidence/source-AIAssistantPanelView-bubble.txt (lines 386-509)"
+      ],
+      "status": "verified",
+      "verifier": {
+        "agent": "orchestrate:orc-verifier",
+        "agentId": "a483320ca8ba43fe5",
+        "verdict": "source + spindump stacks VERIFIED; alternatives (markdown re-parse, per-token autoscroll, network/agent loop) independently RULED OUT",
+        "alternatives_ruled_out": [
+          "Markdown re-parse per token: Markdown(...) only renders when !isLive (code comment + branch at :491-500)",
+          "ScrollViewReader autoscroll per token: onChange triggers on messages.count and state only (:373,:378), not per token; tokens mutate text in place",
+          "Network/AIAgent infinite loop: both spindumps show Num threads:1 pinned inside SwiftUI layout, not networking/async"
+        ],
+        "caveats": [
+          "Verifier could not read raw .diag from its context (group _analyticsusers); primary session confirmed raw files readable and extracts faithful.",
+          "Original log evidence captured the wrong Ollama connection (C19 @00:17). CORRECTED 2026-06-17: file now shows freeze-session C45/C46 @02:21-02:23."
+        ]
+      }
+    }
+  ],
+  "fix": {
+    "applied": true,
+    "applied_where": "Sources/Clippy/AI/AIAssistantPanelView.swift (working tree, NOT committed): removed .textSelection from the isLive Text branch; replaced the Group-level .textSelection(.enabled) with .textSelectionEnabled(!isLive); added a private View.textSelectionEnabled(_:) helper that returns self (no SelectionOverlay) when disabled.",
+    "build": "swift build -c release -> Build complete! (61.75s)",
+    "verified": "partial",
+    "runtime_evidence": "docs/evidence/runtime-cpu-mem-verified.txt (+ -streaming.txt, -streaming-heavy.txt)",
+    "runtime_result": "Fixed binary (ad-hoc signed /tmp/ClippyTest.app) run for ~50 min of real use. A streaming Ollama turn (proven via log: conn C26, 60.4s) ran inside a monitored window: PEAK 9.3% CPU, RSS flat 314 MB, 0 samples over 50% CPU, no new cpu_resource.diag. Contrast: old v1.5 pinned 88-96% CPU and grew to 1.6-2.1 GB on a comparable 64s stream.",
+    "caveat": "Largest stream reproduced under the fix this session was 1.6 KB in / 60s. Tonight's freeze trigger was 48.9 KB in / 64s. A same-magnitude (~48 KB) heavy stream was not reproduced, so the runtime proof is strong-but-not-airtight for the heaviest case. The 60s turn did exercise the per-token render path the fix removes, and stayed flat.",
+    "not_done": "Fix not committed. No same-magnitude (~48 KB) stream captured under the fix.",
+    "to_close_airtight": "Stream a >=40 KB response (long essay to a fast local model) while running docs/evidence runtime watcher; expect CPU to stay low and RSS flat, no cpu_resource.diag."
+  }
+}

@@ -1,0 +1,68 @@
+### Runtime verification (HEAVY stream) - fixed binary /tmp/ClippyTest.app
+### Captured: 2026-06-17 04:32:15 -0400
+### 180s window, 1s samples. Send the long prompt now and let it stream fully.
+### Pass: CPU stays well under 100%/core, RSS stays low-hundreds MB, no new cpu_resource.diag.
+
+t+000s  cpu=   0.0%  rss=  314.1 MB
+t+003s  cpu=   0.0%  rss=  314.1 MB
+t+006s  cpu=   0.0%  rss=  314.1 MB
+t+009s  cpu=   0.0%  rss=  314.1 MB
+t+012s  cpu=   0.0%  rss=  314.1 MB
+t+015s  cpu=   0.0%  rss=  314.1 MB
+t+018s  cpu=   0.0%  rss=  314.1 MB
+t+021s  cpu=   0.0%  rss=  314.1 MB
+t+024s  cpu=   0.0%  rss=  314.1 MB
+t+027s  cpu=   0.0%  rss=  314.1 MB
+t+030s  cpu=   0.0%  rss=  314.1 MB
+t+033s  cpu=   0.0%  rss=  314.1 MB
+t+036s  cpu=   0.0%  rss=  314.1 MB
+t+039s  cpu=   0.0%  rss=  314.1 MB
+t+042s  cpu=   0.0%  rss=  314.1 MB
+t+045s  cpu=   0.0%  rss=  314.1 MB
+t+048s  cpu=   0.0%  rss=  314.1 MB
+t+051s  cpu=   0.0%  rss=  314.1 MB
+t+054s  cpu=   0.0%  rss=  314.1 MB
+t+057s  cpu=   0.0%  rss=  314.1 MB
+t+060s  cpu=   0.0%  rss=  314.1 MB
+t+063s  cpu=   0.0%  rss=  314.1 MB
+t+066s  cpu=   0.0%  rss=  314.1 MB
+t+069s  cpu=   0.0%  rss=  314.1 MB
+t+072s  cpu=   0.0%  rss=  314.1 MB
+t+075s  cpu=   0.0%  rss=  314.1 MB
+t+078s  cpu=   0.0%  rss=  314.1 MB
+t+081s  cpu=   0.0%  rss=  314.1 MB
+t+084s  cpu=   0.0%  rss=  314.1 MB
+t+087s  cpu=   0.0%  rss=  314.1 MB
+t+090s  cpu=   0.0%  rss=  314.1 MB
+t+093s  cpu=   0.0%  rss=  314.1 MB
+t+096s  cpu=   0.0%  rss=  314.1 MB
+t+099s  cpu=   0.0%  rss=  314.1 MB
+t+102s  cpu=   0.0%  rss=  314.1 MB
+t+105s  cpu=   0.0%  rss=  314.1 MB
+t+108s  cpu=   0.0%  rss=  314.1 MB
+t+111s  cpu=   0.0%  rss=  314.1 MB
+t+114s  cpu=   0.0%  rss=  314.1 MB
+t+117s  cpu=   0.0%  rss=  314.1 MB
+t+120s  cpu=   0.0%  rss=  314.1 MB
+t+123s  cpu=   0.0%  rss=  314.1 MB
+t+126s  cpu=   0.0%  rss=  314.1 MB
+t+129s  cpu=   0.0%  rss=  314.1 MB
+t+132s  cpu=   0.0%  rss=  314.1 MB
+t+135s  cpu=   0.0%  rss=  314.1 MB
+t+138s  cpu=   0.0%  rss=  314.1 MB
+t+141s  cpu=   0.0%  rss=  314.1 MB
+t+144s  cpu=   0.0%  rss=  314.1 MB
+t+147s  cpu=   0.0%  rss=  314.1 MB
+t+150s  cpu=   2.7%  rss=  314.5 MB
+t+153s  cpu=   0.0%  rss=  314.2 MB
+t+156s  cpu=   0.0%  rss=  314.2 MB
+t+159s  cpu=   0.0%  rss=  314.1 MB
+t+162s  cpu=   0.0%  rss=  314.1 MB
+t+165s  cpu=   0.0%  rss=  314.1 MB
+t+168s  cpu=   0.0%  rss=  314.1 MB
+t+171s  cpu=   0.0%  rss=  314.1 MB
+t+174s  cpu=   0.0%  rss=  314.1 MB
+t+177s  cpu=   0.5%  rss=  314.1 MB
+
+start rss=314.1 MB   PEAK cpu=8.6%   PEAK rss=315.7 MB
+cpu_resource.diag count before=2 after=2  (new one => runaway recurred)

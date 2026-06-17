@@ -1,0 +1,38 @@
+### Clippy PID 4882 = /Applications/Clippy.app (installed v1.5)
+### Source: /usr/bin/log show --predicate 'process == "Clippy"' --start 2026-06-17 00:00 --end 02:30
+### Captured: 2026-06-17 02:41:50 -0400
+
+=== Freeze-session Ollama (127.0.0.1:11434) streaming turns ===
+Two back-to-back streaming requests immediately before the app went silent:
+
+5794:2026-06-17 02:21:09.039649-0400  ->  C45 start
+6028:2026-06-17 02:22:04.997855-0400  ->  C45 cancelled
+6038:2026-06-17 02:22:04.998050-0400  ->  C46 start
+6115:2026-06-17 02:23:09.676372-0400  ->  C46 cancelled
+
+C45 Duration / C46 Duration + bytes streamed in:
+	Duration: 55.958s, DNS @0.000s took 0.000s, TCP @0.001s took 0.000s
+	Duration: 64.678s, DNS @0.000s took 0.000s, TCP @0.001s took 0.000s
+	bytes in/out: 48923/2219, packets in/out: 162/2, rtt: 0.001s, retransmitted bytes: 0, out-of-order bytes: 0
+
+=== per-minute Clippy log line counts (collapse after 02:22 = frozen main thread, force-quit ~02:23) ===
+  88 2026-06-17 02:06
+ 185 2026-06-17 02:07
+ 108 2026-06-17 02:08
+  84 2026-06-17 02:09
+ 191 2026-06-17 02:10
+ 151 2026-06-17 02:11
+  93 2026-06-17 02:12
+   5 2026-06-17 02:13
+   1 2026-06-17 02:17
+  69 2026-06-17 02:19
+ 118 2026-06-17 02:20
+ 219 2026-06-17 02:21
+ 106 2026-06-17 02:22
+   6 2026-06-17 02:23
+   1 2026-06-17 02:24
+
+=== last 3 Clippy log lines (app goes silent after C46 teardown) ===
+2026-06-17 02:23:09.676429-0400  localhost Clippy[4882]: (Network) [com.apple.network:connection] nw
+2026-06-17 02:23:09.676495-0400  localhost Clippy[4882]: (CFNetwork) [com.apple.CFNetwork:Default] C
+2026-06-17 02:24:05.996213-0400  localhost Clippy[4882]: (RunningBoardServices) Created Activity ID:

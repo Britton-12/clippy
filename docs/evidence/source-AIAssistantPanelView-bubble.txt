@@ -1,0 +1,126 @@
+### SOURCE: Sources/Clippy/AI/AIAssistantPanelView.swift (lines 386-509), HEAD 2c29f05, branch main
+
+386	    /// Show the typing indicator only while streaming AND before the first
+387	    /// token lands in the live assistant bubble, so it disappears once text arrives.
+388	    private var showThinkingIndicator: Bool {
+389	        vm.state == .streaming && (vm.messages.last?.text.isEmpty ?? false)
+390	    }
+391	
+392	    private var thinkingIndicator: some View {
+393	        HStack(spacing: 8) {
+394	            ProgressView().controlSize(.small)
+395	            Text("Thinking...")
+396	                .font(PanelTypography.body(settings))
+397	                .foregroundStyle(tokens.textSecondary)
+398	        }
+399	        .padding(.horizontal, 12)
+400	        .padding(.vertical, 8)
+401	        .background(tokens.cardSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+402	        .overlay(
+403	            RoundedRectangle(cornerRadius: 12, style: .continuous)
+404	                .strokeBorder(tokens.cardBorder, lineWidth: 1)
+405	        )
+406	    }
+407	
+408	    private func notConfiguredState(icon: String, message: String, cta: String) -> some View {
+409	        VStack(spacing: 16) {
+410	            Image(systemName: icon)
+411	                .font(.system(size: 36, weight: .light))
+412	                .symbolRenderingMode(.hierarchical)
+413	                .foregroundStyle(tokens.textSecondary)
+414	            Text(message)
+415	                .font(PanelTypography.body(settings))
+416	                .foregroundStyle(tokens.textSecondary)
+417	                .multilineTextAlignment(.center)
+418	                .padding(.horizontal, 20)
+419	            Button(cta) { onOpenSettings() }
+420	                .buttonStyle(.bordered)
+421	        }
+422	        .frame(maxWidth: .infinity, maxHeight: .infinity)
+423	        .background(tokens.scrollBackground.opacity(settings.panelOpacity))
+424	    }
+425	
+426	    // MARK: Input bar
+427	
+428	    private var inputBar: some View {
+429	        HStack(spacing: 8) {
+430	            TextField("Ask anything...", text: $vm.inputText, axis: .vertical)
+431	                .lineLimit(1...4)
+432	                .textFieldStyle(.plain)
+433	                .font(PanelTypography.body(settings))
+434	                .foregroundStyle(tokens.textPrimary)
+435	                .focused($inputFocused)
+436	                .accessibilityLabel("Message input")
+437	                .onSubmit {
+438	                    if !vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+439	                        && vm.state == .ready {
+440	                        vm.send()
+441	                    }
+442	                }
+443	                .onAppear { inputFocused = true }
+444	            Button {
+445	                if vm.state == .streaming { vm.stop() } else { vm.send() }
+446	            } label: {
+447	                Image(systemName: vm.state == .streaming ? "stop.circle.fill" : "arrow.up.circle.fill")
+448	                    .font(.system(size: 22))
+449	                    .symbolRenderingMode(.hierarchical)
+450	                    .foregroundStyle(
+451	                        vm.state == .streaming ? tokens.accent
+452	                        : (vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tokens.textSecondary : tokens.accent))
+453	                    // Swap send <-> stop as a symbol replace when streaming starts/ends.
+454	                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+455	            }
+456	            .buttonStyle(.plain)
+457	            .accessibilityLabel(vm.state == .streaming ? "Stop" : "Send")
+458	            .disabled(vm.state != .streaming && vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+459	        }
+460	        .padding(.horizontal, 12)
+461	        .padding(.vertical, 8)
+462	        .background(tokens.footerBar.opacity(settings.panelOpacity))
+463	    }
+464	}
+465	
+466	// MARK: - Message bubble
+467	
+468	private struct MessageBubble: View {
+469	    let message: AssistantMessage
+470	    let tokens: ThemeTokens
+471	    let settings: AppSettings
+472	    let isLive: Bool
+473	    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+474	
+475	    var body: some View {
+476	        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+477	            HStack {
+478	                if message.role == .user { Spacer(minLength: 40) }
+479	                // Error messages show a warning glyph prefix and use danger color.
+480	                Group {
+481	                    if message.isError {
+482	                        Label {
+483	                            Text(message.text.isEmpty ? " " : message.text)
+484	                        } icon: {
+485	                            Image(systemName: "exclamationmark.triangle.fill")
+486	                                .symbolRenderingMode(.hierarchical)
+487	                        }
+488	                            .font(PanelTypography.body(settings))
+489	                            .foregroundStyle(tokens.danger)
+490	                    } else if message.role == .assistant {
+491	                        // While a turn is streaming, render plain Text: re-parsing the
+492	                        // whole markdown string on every flush saturates the main thread.
+493	                        // Swap to Markdown once the turn is done (isLive == false).
+494	                        if isLive {
+495	                            Text(message.text.isEmpty ? " " : message.text)
+496	                                .font(PanelTypography.body(settings))
+497	                                .foregroundStyle(tokens.textPrimary)
+498	                                .textSelection(.enabled)
+499	                        } else {
+500	                            Markdown(message.text.isEmpty ? " " : message.text)
+501	                                .markdownTheme(.clippy(tokens: tokens, settings: settings))
+502	                        }
+503	                    } else {
+504	                        Text(message.text.isEmpty ? " " : message.text)
+505	                            .font(PanelTypography.body(settings))
+506	                            .foregroundStyle(tokens.isDark ? Color.white : Color(nsColor: .labelColor).opacity(0.9))
+507	                    }
+508	                }
+509	                .textSelection(.enabled)

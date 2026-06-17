@@ -1,0 +1,66 @@
+### SOURCE: /Library/Logs/DiagnosticReports/Clippy_2026-06-16-001516_JMMBPM5-10.cpu_resource.diag
+### Captured: 2026-06-17 02:37:37 -0400
+
+Date/Time:        2026-06-16 00:13:42.095 -0400
+Path:             /Applications/Clippy.app/Contents/MacOS/Clippy
+Version:          1.5 (1.5)
+Event:            cpu usage
+CPU:              90 seconds cpu time over 94 seconds (96% cpu average), exceeding limit of 50% cpu over 180 seconds
+Path:             /Applications/Clippy.app/Contents/MacOS/Clippy
+Version:          1.5 (1.5)
+Footprint:        100.80 MB -> 1611.17 MB (+1510.38 MB)
+Note:             Unresponsive
+Num threads:      1
+
+=== Heaviest stack for the target process ===
+Heaviest stack for the target process:
+  32  start + 6992 (dyld + 130560) [0x18b2f3e00]
+  32  Clippy_main + 140 (Clippy + 107988) [0x10287a5d4]
+  32  -[NSApplication run] + 368 (AppKit + 180540) [0x18fb8f13c]
+  32  -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72 (AppKit + 12379580) [0x1907315bc]
+  32  -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688 (AppKit + 12380336) [0x1907318b0]
+  32  _DPSNextEvent + 576 (AppKit + 233604) [0x18fb9c084]
+  32  _DPSBlockUntilNextEventMatchingListInMode + 228 (AppKit + 7230300) [0x19024835c]
+  32  _BlockUntilNextEventMatchingListInMode + 48 (HIToolbox + 2400588) [0x1986e014c]
+  32  ReceiveNextEventCommon + 272 (HIToolbox + 788452) [0x1985567e4]
+  32  RunCurrentEventLoopInMode + 320 (HIToolbox + 775520) [0x198553560]
+  32  _CFRunLoopRunSpecificWithOptions + 588 (CoreFoundation + 1372668) [0x18b8401fc]
+  32  __CFRunLoopDoObservers + 648 (CoreFoundation + 512528) [0x18b76e210]
+  32  __CFRUNLOOP_IS_CALLING_OUT_TO_AN_OBSERVER_CALLBACK_FUNCTION__ + 36 (CoreFoundation + 512788) [0x18b76e314]
+  32  @objc closure #1 in static NSRunLoop.addObserver(_:) + 28 (SwiftUICore + 13403148) [0x238f7340c]
+  32  specialized static NSRunLoop.flushObservers() + 396 (SwiftUICore + 13404432) [0x238f73910]
+  32  <deduplicated_symbol> + 28 (SwiftUICore + 4552836) [0x238702884]
+  32  partial apply for closure #1 in closure #1 in NSHostingView.beginTransaction() + 80 (SwiftUI + 8997424) [0x1c0c63a30]
+  32  static Update.ensure<A>(_:) + 100 (SwiftUICore + 5540336) [0x2387f39f0]
+  32  closure #1 in static Update.ensure<A>(_:) + 56 (SwiftUICore + 5546248) [0x2387f5108]
+  32  partial apply for closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 24 (SwiftUI + 8997464) [0x1c0c63a58]
+  32  closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 172 (SwiftUI + 8942244) [0x1c0c562a4]
+  32  ViewGraphRootValueUpdater.updateGraph<A>(body:) + 180 (SwiftUICore + 13840368) [0x238fddff0]
+  32  ViewGraphRootValueUpdater._updateViewGraph<A>(body:) + 232 (SwiftUICore + 13847240) [0x238fdfac8]
+  32  partial apply for closure #1 in ViewGraphRootValueUpdater.updateGraph<A>(body:) + 28 (SwiftUICore + 13861856) [0x238fe33e0]
+  32  closure #1 in closure #1 in closure #1 in closure #1 in NSHostingView.beginTransaction() + 24 (SwiftUI + 8942300) [0x1c0c562dc]
+  32  GraphHost.flushTransactions() + 180 (SwiftUICore + 8157024) [0x238a72760]
+  27  specialized GraphHost.runTransaction(_:do:id:) + 368 (SwiftUICore + 8275872) [0x238a8f7a0]
+  25  AG::Subgraph::update(unsigned int) + 972 (AttributeGraph + 117848) [0x1c1b35c58]
+  23  AG::Graph::UpdateStack::update() + 496 (AttributeGraph + 54148) [0x1c1b26384]
+  11  partial apply for implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:) + 32 (SwiftUICore + 2423512) [0x2384faad8]
+  8   closure #1 in PlatformViewChild.updateValue() + 5484 (SwiftUICore + 2580916) [0x2385211b4]
+  8   closure #1 in closure #7 in closure #1 in PlatformViewChild.updateValue() + 764 (SwiftUICore + 2588244) [0x238522e54]
+  8   ViewRendererHost.performExternalUpdate(_:) + 284 (SwiftUICore + 13841368) [0x238fde3d8]
+  8   closure #1 in closure #1 in closure #7 in closure #1 in PlatformViewChild.updateValue() + 876 (SwiftUICore + 2589252) [0x238523244]
+  8   PlatformViewRepresentableAdaptor.updateViewProvider(_:context:) + 448 (SwiftUI + 7199528) [0x1c0aacb28]
+  4   protocol witness for NSViewRepresentable.updateNSView(_:context:) in conformance SelectionOverlay + 52 (SwiftUI + 6050720) [0x1c09943a0]
+  3   SelectionOverlay.updateNSView(_:context:) + 1496 (SwiftUI + 6045240) [0x1c0992e38]
+  3   ??? (JetUI + 387352) [0x1ef298918]
+  2   -[NSControl setFont:] + 100 (AppKit + 454768) [0x18fbd2070]
+  2   -[NSCell setFont:] + 236 (AppKit + 392480) [0x18fbc2d20]
+  2   -[NSTextFieldCell _invalidateEffectiveFont] + 72 (AppKit + 8130744) [0x1903240b8]
+  1   -[NSTextFieldCell _effectiveFontDidChangeTo:] + 196 (AppKit + 8130636) [0x19032404c]
+  1   -[NSTextFieldCell _bezelConfigurationInView:] + 176 (AppKit + 8123540) [0x190322494]
+  1   -[NSView backingScaleFactor] + 48 (AppKit + 555352) [0x18fbea958]
+  1   -[NSView convertSizeToBacking:] + 36 (AppKit + 555768) [0x18fbeaaf8]
+  1   NSViewGetTransformToBacking + 376 (AppKit + 14028332) [0x1908c3e2c]
+  1   NSViewGetTransformToAncestor + 352 (AppKit + 14027184) [0x1908c39b0]
+
+
+Powerstats for:   Clippy [36835] [unique pid 3587732]

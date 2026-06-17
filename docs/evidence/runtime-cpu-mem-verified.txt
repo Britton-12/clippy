@@ -1,0 +1,23 @@
+### Runtime verification w/ stream-occurred proof - fixed binary
+### Window start: 2026-06-17 04:36:37  (240s, peak-tracked every 1s)
+### Stream a long response ANY time in the next 4 min; the log check below proves it ran.
+
+PEAK cpu=9.3%   PEAK rss=314.0 MB   samples_over_50%CPU=0
+cpu_resource.diag before=2 after=2
+
+=== PROOF a stream ran during the window (Ollama :11434 turns) ===
+sed: 2: "s/.*\[(C[0-9]+) .*\] (s ...": undefined label '; s/^\s*([0-9-]+ [0-9:.]+).*(Duration:.*)/  \1  \2/; t; s/.*(bytes in\/out:[^,]*).*/  \1/'
+(if no lines above, no stream occurred in the window -> result inconclusive)
+
+=== STREAM-OCCURRED PROOF (re-queried, window 04:36:37-04:40:40) ===
+Ollama :11434 connection C26: start 04:38:40, cancelled 04:39:41, Duration 60.433s, bytes in/out: 1626/4643
+=> A real streaming turn ran inside the watch window. During it: PEAK cpu=9.3%, RSS flat 314.0 MB,
+   0 samples over 50% CPU, no new cpu_resource.diag.
+
+INTERPRETATION:
+- Fixed build handled a 60s streaming turn with CPU <=9.3% and zero memory growth.
+- Old build (v1.5) pinned one core 88-96% and grew to 1.6-2.1 GB on a comparable 64s/48KB stream
+  (see spindump evidence). The contrast is decisive for the failure mode.
+- CAVEAT: largest stream captured this session = 1.6 KB in. Tonight's freeze trigger was 48.9 KB in.
+  A same-magnitude (~48 KB) stream was not reproduced under the fix; the per-token render path was
+  exercised over 60s and stayed flat, which exercises the same loop the fix removes.
