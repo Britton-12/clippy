@@ -1,0 +1,23 @@
+### Feature branch: clips files/grid/search + AI streaming selection
+### Captured: 2026-06-17 ~06:00 EDT
+
+BUILD (release): `swift build -c release` -> Build complete!
+BUILD (debug):   `swift build -c debug`   -> Build complete!
+
+TESTS: `swift test` (Xcode-beta toolchain, scratch path outside iCloud)
+  - New ClipSearchQueryTests: 12 passed, 0 failed
+      * parser: empty, text-only, #app-only, #2weeks, combined, #today/#yesterday,
+        short forms (#3d/#month), unknown unit -> app, multiple durations widest
+      * DB-backed: #edge filters by sourceApp; #2weeks filters by date;
+        "invoice #edge" combines FTS text + app filter
+  - Full suite: 297 tests, 0 failures (285 prior + 12 new) -> migration v6 and
+    model/search changes introduced no regressions.
+
+VERIFICATION STATUS BY FEATURE
+  F (search grammar):       VERIFIED (build + 12 tests incl. DB integration)
+  C (file clips):           build-verified + full suite green (migration safe);
+                            GUI runtime (capture/paste/move/extract) NOT yet observed
+  D (1-4 column grid):      build-verified; GUI runtime NOT yet observed
+  E (date buckets):         build-verified; GUI runtime NOT yet observed
+  A (streaming selection):  build-verified; runtime perf under heavy stream NOT yet observed
+  B (freeze fix):           committed; ~48 KB heavy-stream runtime proof still pending

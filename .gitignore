@@ -31,6 +31,8 @@
 !Tests/**
 !docs/
 !docs/**
+!.agents/
+!.agents/**
 !scripts/
 !scripts/**
 !assets/

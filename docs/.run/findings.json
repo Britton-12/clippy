@@ -41,7 +41,21 @@
     "runtime_evidence": "docs/evidence/runtime-cpu-mem-verified.txt (+ -streaming.txt, -streaming-heavy.txt)",
     "runtime_result": "Fixed binary (ad-hoc signed /tmp/ClippyTest.app) run for ~50 min of real use. A streaming Ollama turn (proven via log: conn C26, 60.4s) ran inside a monitored window: PEAK 9.3% CPU, RSS flat 314 MB, 0 samples over 50% CPU, no new cpu_resource.diag. Contrast: old v1.5 pinned 88-96% CPU and grew to 1.6-2.1 GB on a comparable 64s stream.",
     "caveat": "Largest stream reproduced under the fix this session was 1.6 KB in / 60s. Tonight's freeze trigger was 48.9 KB in / 64s. A same-magnitude (~48 KB) heavy stream was not reproduced, so the runtime proof is strong-but-not-airtight for the heaviest case. The 60s turn did exercise the per-token render path the fix removes, and stayed flat.",
-    "not_done": "Fix not committed. No same-magnitude (~48 KB) stream captured under the fix.",
+    "not_done": "No same-magnitude (~48 KB) stream captured under the fix.",
     "to_close_airtight": "Stream a >=40 KB response (long essay to a fast local model) while running docs/evidence runtime watcher; expect CPU to stay low and RSS flat, no cpu_resource.diag."
+  },
+  "feature_batch": {
+    "branch": "feature/clips-files-grid-search-ai",
+    "evidence": "docs/evidence/feature-build-test-results.txt",
+    "build": "swift build -c debug and -c release both: Build complete!",
+    "tests": "swift test (Xcode-beta toolchain, scratch path): 297 tests, 0 failures (285 prior + 12 new ClipSearchQueryTests).",
+    "features": {
+      "F_search_grammar": {"status": "verified", "evidence": "12 tests incl. DB-backed #app and #duration filtering; full suite green"},
+      "C_file_clips": {"status": "build-verified", "note": "full suite green confirms migration v6 is safe; GUI capture/paste/move/extract NOT yet observed at runtime"},
+      "D_column_grid": {"status": "build-verified", "note": "GUI runtime not yet observed"},
+      "E_date_buckets": {"status": "build-verified", "note": "pure logic; GUI runtime not yet observed"},
+      "A_streaming_selection": {"status": "build-verified", "note": "runtime perf under a heavy stream not yet observed"},
+      "B_freeze_fix": {"status": "verified-partial", "note": "committed; ~48 KB heavy-stream runtime proof still pending"}
+    }
   }
 }
