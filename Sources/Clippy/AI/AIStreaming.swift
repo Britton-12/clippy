@@ -44,7 +44,7 @@ enum AIStreamingHTTP {
                 let lastActivity = ActivityClock()
                 let watchdog = Task.detached {
                     while !Task.isCancelled {
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        try? await Task.sleep(for: .seconds(1))
                         if lastActivity.secondsSince() > idleTimeout {
                             continuation.finish(throwing: AIError.http(-1, "stream idle timeout"))
                             return

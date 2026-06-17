@@ -275,8 +275,10 @@ struct AIActionEditorView: View {
                 }
 
                 Section("Model Parameters") {
-                    LabeledContent("Temperature: \(String(format: "%.1f", temperature))") {
+                    LabeledContent {
                         Slider(value: $temperature, in: 0.0...1.0, step: 0.1)
+                    } label: {
+                        Text("Temperature: \(temperature, format: .number.precision(.fractionLength(1)))")
                     }
                     Text("Lower = more deterministic. Higher = more creative.")
                         .font(.caption)

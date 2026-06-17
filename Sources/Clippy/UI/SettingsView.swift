@@ -194,7 +194,7 @@ private struct WindowAppearanceApplier: NSViewRepresentable {
         // The hosting window is often nil during the first layout pass, so defer
         // to the next runloop turn. Apply only when the value actually changed to
         // avoid redundant repaints, and no-op while the window is still nil.
-        DispatchQueue.main.async {
+        Task { @MainActor in
             guard let window = view.window, window.appearance != target else { return }
             window.appearance = target
         }
@@ -789,7 +789,7 @@ private struct CaptureSettingsTab: View {
                         TextEditor(text: $ignoredAppsText)
                             .font(.system(.caption, design: .monospaced))
                             .frame(height: 90)
-                            .cornerRadius(6)
+                            .clipShape(.rect(cornerRadius: 6))
                             .focused($ignoredAppsFocused)
                             // Commit on focus loss instead of per keystroke so a
                             // half-typed bundle ID is not persisted, and so invalid

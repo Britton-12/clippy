@@ -28,7 +28,7 @@ struct SelectAllTextField: NSViewRepresentable {
         field.cell?.usesSingleLineMode = true
         field.cell?.wraps = false
         field.cell?.isScrollable = true
-        DispatchQueue.main.async { [weak field] in
+        Task { @MainActor [weak field] in
             guard let field, field.window != nil else { return }
             field.window?.makeFirstResponder(field)
         }

@@ -181,7 +181,8 @@ private struct TextClipEditor: View {
 
     private func showStatus(_ message: String) {
         statusMessage = message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
             if statusMessage == message {
                 statusMessage = nil
             }

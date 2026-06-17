@@ -573,7 +573,8 @@ struct ClipListView: View {
                             ocrProcessingClipID = nil
                             ocrStatusMessage = message
                             // Auto-dismiss after 3 seconds.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(3))
                                 if ocrStatusMessage == message { ocrStatusMessage = nil }
                             }
                         }
@@ -675,7 +676,8 @@ struct ClipListView: View {
     /// Show `message` in the OCR-style status banner for ~2 seconds.
     private func showStatusBanner(_ message: String) {
         ocrStatusMessage = message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
             if ocrStatusMessage == message {
                 ocrStatusMessage = nil
             }

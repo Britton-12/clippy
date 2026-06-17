@@ -92,7 +92,7 @@ final class ICloudSyncService: ObservableObject {
             guard fm.fileExists(atPath: placeholder.path) else { return }
             try? fm.startDownloadingUbiquitousItem(at: url)
             for _ in 0..<10 where !fm.fileExists(atPath: url.path) {
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
         guard fm.fileExists(atPath: url.path),

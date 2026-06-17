@@ -33,7 +33,7 @@ final class HotKeyCenter {
                 { _, _, userData -> OSStatus in
                     guard let userData else { return noErr }
                     let center = Unmanaged<HotKeyCenter>.fromOpaque(userData).takeUnretainedValue()
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         center.handler?()
                     }
                     return noErr

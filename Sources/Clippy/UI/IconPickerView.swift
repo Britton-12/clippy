@@ -38,9 +38,9 @@ struct IconPickerView: View {
     /// Symbols matching the current query (case-insensitive substring on the
     /// symbol name). An empty query shows the full curated list.
     private var filteredSymbols: [String] {
-        let query = symbolQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let query = symbolQuery.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return CategorySymbols.all }
-        return CategorySymbols.all.filter { $0.lowercased().contains(query) }
+        return CategorySymbols.all.filter { $0.localizedStandardContains(query) }
     }
 
     private static let emojis: [String] = [

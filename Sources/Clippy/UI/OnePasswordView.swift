@@ -406,7 +406,7 @@ private struct FieldRow: View {
             let changeCount = pb.changeCount
             let delay = autoClearSecs
             Task {
-                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+                try? await Task.sleep(for: .seconds(UInt64(delay)))
                 await MainActor.run {
                     // Only clear if the pasteboard hasn't been written to since.
                     if NSPasteboard.general.changeCount == changeCount {

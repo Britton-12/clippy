@@ -205,7 +205,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         DispatchQueue.global(qos: .userInteractive).async { [weak self, weak panel] in
             guard let self else { return }
             let caretRect = CaretLocator.caretScreenRect()
-            DispatchQueue.main.async { [weak self, weak panel] in
+            Task { @MainActor [weak self, weak panel] in
                 guard let self, let panel, panel.isVisible else { return }
                 let target: NSRect
                 if let caret = caretRect {
