@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-06-16 - Overhaul wave (settings regression, themes, sounds, logging, drag/drop, AI, SwiftUI modernization)
+
+### Fixed
+- CRITICAL: settings and edits no longer silently do nothing. AppSettings
+  declared its own `let objectWillChange = ObservableObjectPublisher()`, which
+  suppressed Swift's auto-wiring of every `@Published` property to the publisher,
+  so the 8 `@Published` settings (polling interval, MCP, font size, panel
+  opacity, capture sound, keystroke threshold, 1Password clear delay, MCP port)
+  mutated UserDefaults but never told any view to re-render. Removing the line
+  restores live updates. Proven with a standalone Combine repro and a regression
+  test (AppSettingsObservationTests) that exercises the real AppSettings.
+- Drag-and-drop: category reorder no longer swallowed. Category rows stacked two
+  `dropDestination(for: String.self)`; SwiftUI drops do not cascade, so
+  `reorder:cat:` tokens were rejected. Collapsed to one routed drop destination
+  (pure router with unit tests). Clip-card drags now use simultaneousGesture so
+  the tap no longer claims the mouse-down before the drag can start.
+- AI Assistant: the Azure `YOUR-RESOURCE` placeholder endpoint now yields a
+  precise "not configured" message instead of an opaque DNS error. Audit found
+  the network path was otherwise functional; the dominant "never worked" cause
+  was the settings regression above (the enable toggle was a no-op). Anthropic
+  default model refreshed to `claude-haiku-4-5`.
+
+### Added
+- Configurable log level (verbose/debug/info/warning/error) in Settings >
+  General; ClippyLog gates both the os.Logger and file sinks on the threshold.
+- Every Apple system sound is now selectable as the capture sound: the full
+  CoreAudio SystemSounds tree (Finder, Dock, System UI, Siri, FaceTime,
+  Telephony, Accessibility, Ink) enumerated from disk and grouped, plus the
+  curated highlights (about 95 sounds, up from about 27).
+- Theme per-token overrides: any color token can be tweaked on top of ANY preset
+  (no longer gated behind the Custom preset), with per-row and global Reset.
+  success/danger are now overridable. Nord polar-night values corrected to the
+  canonical palette; Tokyo Night preset added (canonical hex).
+- Theme-shaded, animated SF Symbols app-wide: hierarchical/palette rendering from
+  ThemeTokens, with Reduce-Motion-gated effects on real state transitions
+  (pin/copy/run completion, icon swaps, AI streaming, 1Password refresh).
+
+### Changed
+- SwiftUI SDK alignment (behavior-preserving): main-thread UI hops moved from
+  DispatchQueue to structured concurrency (Task { @MainActor } / Task.sleep(for:));
+  foregroundColor -> foregroundStyle; cornerRadius -> clipShape(.rect); user
+  search -> localizedStandardContains; numeric Text via format API; AI actions
+  empty state -> native ContentUnavailableView. Serial-queue locks, completion
+  contracts, and real-time keystroke timing deliberately left as-is.
+
+### Not yet done (tracked for a follow-up)
+- Apple Intelligence (Foundation Models) and MLX on-device providers, plus the
+  macOS 26 deployment-floor raise they require (coupled; the floor only pays off
+  once those APIs are adopted, and there are no dead #available gates to remove).
+- AppSettings/stores migration from ObservableObject to @Observable (internal;
+  must rewire the Combine `$` projections first).
+
 ## 2026-06-16 - Deduplication wave + reliability fixes (PATHFINDER U1-U6 + F-trace)
 
 ### Fixed
